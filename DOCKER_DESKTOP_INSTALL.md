@@ -127,28 +127,7 @@ Complete guide for installing and running Aruba Central Portal on Docker Desktop
 
 ## Quick Start
 
-### Method 1: Using Pre-built Image from GitHub Container Registry (Easiest)
-
-```bash
-# 1. Create a project directory
-mkdir aruba-central-portal
-cd aruba-central-portal
-
-# 2. Download docker-compose file
-curl -O https://raw.githubusercontent.com/secure-ssid/aruba-central-portal/main/docker-compose.ghcr.yml
-
-# 3. Create .env file
-curl -O https://raw.githubusercontent.com/secure-ssid/aruba-central-portal/main/.env.example
-mv .env.example .env
-
-# 4. Start the application
-docker compose -f docker-compose.ghcr.yml up -d
-
-# 5. Access the Setup Wizard
-# Open browser to: http://localhost:1344
-```
-
-### Method 2: Building from Source
+### Method 1: Building from Source
 
 ```bash
 # 1. Clone the repository
@@ -164,23 +143,6 @@ docker compose up -d --build
 # 4. Access the Setup Wizard
 # Open browser to: http://localhost:1344
 ```
-
-### Method 3: Docker Desktop GUI
-
-1. **Open Docker Desktop**
-
-2. **Click "Images" → "Search"**
-   - Search for: `ghcr.io/secure-ssid/aruba-central-portal`
-
-3. **Pull the image**
-
-4. **Click "Run"**
-   - Container name: `aruba-central-portal`
-   - Port: `1344:1344`
-   - Add environment variables (or mount .env file)
-
-5. **Access the application:**
-   - Open browser to: http://localhost:1344
 
 ---
 
@@ -411,11 +373,7 @@ docker compose logs > logs.txt
 ### Updating the Application
 
 ```bash
-# Pull latest image (if using GHCR)
-docker compose -f docker-compose.ghcr.yml pull
-docker compose -f docker-compose.ghcr.yml up -d
-
-# Or rebuild from source
+# Pull latest changes and rebuild
 git pull
 docker compose up -d --build
 ```
