@@ -4,9 +4,7 @@
 
 [![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen)](_ARCHIVE/unused/qa_reports/CUSTOMER_VERIFICATION_REPORT.md)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](DOCKER_DESKTOP_INSTALL.md)
-[![GHCR](https://img.shields.io/badge/ghcr.io-latest-blue?logo=docker)](https://github.com/secure-ssid?tab=packages)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![GitHub Actions](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=github-actions)](https://github.com/secure-ssid/aruba-central-portal/actions)
 
 ## 👋 New Here? **[→ Start Here](START_HERE.md)** ⭐
 
@@ -21,29 +19,7 @@
 
 Choose your installation method:
 
-### 1️⃣ Docker Pull from GHCR (Fastest!)
-```bash
-# Pull pre-built image from GitHub Container Registry
-docker pull ghcr.io/secure-ssid/aruba-central-portal:latest
-
-# Run with docker-compose
-curl -O https://raw.githubusercontent.com/secure-ssid/aruba-central-portal/main/docker-compose.ghcr.yml
-curl -O https://raw.githubusercontent.com/secure-ssid/aruba-central-portal/main/.env.example
-mv .env.example .env
-docker compose -f docker-compose.ghcr.yml up -d
-
-# Access http://localhost:1344 and use Setup Wizard to configure
-```
-
-### 2️⃣ Docker Desktop (Easiest for Windows/macOS)
-```bash
-# See comprehensive guide: DOCKER_DESKTOP_INSTALL.md
-docker pull ghcr.io/secure-ssid/aruba-central-portal:latest
-docker run -d -p 1344:1344 --name aruba-central-portal \
-  --env-file .env ghcr.io/secure-ssid/aruba-central-portal:latest
-```
-
-### 3️⃣ Build from Source
+### 1️⃣ Docker Desktop (Recommended)
 ```bash
 git clone https://github.com/secure-ssid/aruba-central-portal.git
 cd aruba-central-portal
@@ -57,7 +33,7 @@ docker compose up -d --build
 # Access http://localhost:1344 and use Setup Wizard to configure
 ```
 
-### 4️⃣ Python/Development
+### 2️⃣ Python/Development
 ```bash
 git clone https://github.com/secure-ssid/aruba-central-portal.git
 cd aruba-central-portal
@@ -67,7 +43,6 @@ pip install -r requirements.txt
 
 **📖 Installation Guides:**
 - **[Docker Desktop Install Guide](DOCKER_DESKTOP_INSTALL.md)** - Complete Docker Desktop setup (Windows/macOS/Linux)
-- **[Docker GitHub Setup](DOCKER_GITHUB_SETUP.md)** - Push Docker images to GitHub (5 minutes) ⭐
 - **[START_HERE.md](START_HERE.md)** - General setup guide
 
 ---
@@ -78,7 +53,6 @@ pip install -r requirements.txt
 |----------|-------------|----------|
 | **[START_HERE.md](START_HERE.md)** | Complete getting started guide | Everyone ⭐ |
 | **[DOCKER_DESKTOP_INSTALL.md](DOCKER_DESKTOP_INSTALL.md)** | Docker Desktop setup guide | Docker users ⭐ |
-| **[GITHUB_CONTAINER_REGISTRY.md](GITHUB_CONTAINER_REGISTRY.md)** | Publishing to GHCR | Developers/DevOps |
 | **[QUICK_START_NO_GIT.md](QUICK_START_NO_GIT.md)** | Setup without Git | NAS users |
 | **[DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)** | Production Docker guide | DevOps |
 | **[UGREEN_NAS_SETUP.md](UGREEN_NAS_SETUP.md)** | Ugreen NAS guide | NAS users |
