@@ -22,7 +22,7 @@ import {
   Tabs,
   Tab,
 } from '@mui/material';
-import { deviceAPI } from '../services/api';
+import { deviceAPI, monitoringAPIv2 } from '../services/api';
 import DataTableFilter from '../components/DataTableFilter';
 import {
   exportToCSV,
@@ -38,6 +38,7 @@ function DevicesPage() {
   const [devices, setDevices] = useState([]);
   const [switches, setSwitches] = useState([]);
   const [accessPoints, setAccessPoints] = useState([]);
+  const [gateways, setGateways] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [tabValue, setTabValue] = useState(0);
   const [sortBy, setSortBy] = useState('name');
@@ -53,10 +54,11 @@ function DevicesPage() {
       setError('');
 
       // Fetch all device types in parallel
-      const [devicesData, switchesData, apsData] = await Promise.allSettled([
+      const [devicesData, switchesData, apsData, gatewaysData] = await Promise.allSettled([
         deviceAPI.getAll(),
         deviceAPI.getSwitches(),
         deviceAPI.getAccessPoints(),
+        monitoringAPIv2.getGatewaysMonitoring(),
       ]);
 
       // Process devices
@@ -76,6 +78,23 @@ function DevicesPage() {
         const apList = apsData.value.aps || apsData.value.items || [];
         setAccessPoints(apList);
       }
+
+      // Process Gateways
+      if (gatewaysData.status === 'fulfilled') {
+        const gwItems = gatewaysData.value.items || gatewaysData.value.gateways || [];
+        // Normalize to common fields used by table
+        const normalized = gwItems.map((g) => ({
+          deviceName: g.deviceName || g.name || g.hostname || 'N/A',
+          serialNumber: g.serialNumber || g.serial || g.id || '',
+          model: g.model || g.platformModel || g.platform || '',
+          macAddress: g.macAddress || g.mac || '',
+          status: g.status || g.deviceStatus || g.state || '',
+          ipv4: g.ipv4 || g.ipAddress || g.ip || '',
+          ipv6: g.ipv6 || '',
+          deviceType: g.deviceType || 'Gateway',
+        }));
+        setGateways(normalized);
+      }
     } catch (err) {
       setError(err.message || 'Failed to load devices');
     } finally {
@@ -94,6 +113,7 @@ function DevicesPage() {
   const getCurrentDeviceList = () => {
     if (tabValue === 1) return switches;
     if (tabValue === 2) return accessPoints;
+    if (tabValue === 3) return gateways;
     return devices;
   };
 
@@ -318,6 +338,7 @@ function DevicesPage() {
             <Tab label={`All Devices (${devices.length})`} />
             <Tab label={`Switches (${switches.length})`} />
             <Tab label={`Access Points (${accessPoints.length})`} />
+            <Tab label={`Gateways (${gateways.length})`} />
           </Tabs>
         </Box>
 
@@ -331,6 +352,7 @@ function DevicesPage() {
               {tabValue === 0 && renderDeviceTable(devices, 'all')}
               {tabValue === 1 && renderDeviceTable(switches, 'switches')}
               {tabValue === 2 && renderDeviceTable(accessPoints, 'aps')}
+              {tabValue === 3 && renderDeviceTable(gateways, 'gateways')}
             </>
           )}
         </CardContent>

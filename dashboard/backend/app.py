@@ -4359,6 +4359,86 @@ def get_swarm_details(swarm_id):
         return jsonify({"error": str(e)}), 500
 
 
+# Geocoding and Timezone proxy endpoints (free providers, no API keys)
+try:
+    import requests as _requests  # type: ignore
+except Exception:
+    _requests = None
+
+@app.route('/api/geocode/search', methods=['GET'])
+def geocode_search():
+    """
+    Proxy to free geocoding provider (Nominatim) to avoid browser CSP/CORS issues.
+    Query params:
+      - q: search text
+      - limit: max results (default 5)
+      - country: optional ISO2 filter (e.g., 'us'); if not provided we default to US
+    """
+    try:
+        if not _requests:
+            return jsonify({"error": "requests module unavailable"}), 500
+        q = request.args.get('q', '').strip()
+        limit = int(request.args.get('limit', '5'))
+        country = (request.args.get('country') or 'us').lower()
+        if not q:
+            return jsonify({"items": []})
+        resp = _requests.get(
+            'https://nominatim.openstreetmap.org/search',
+            params={'q': q, 'format': 'json', 'addressdetails': 1, 'limit': limit},
+            headers={'User-Agent': 'aruba-central-portal/1.0'}
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        items = []
+        for it in data:
+            addr = it.get('address', {}) if isinstance(it.get('address'), dict) else {}
+            # Enforce US-only (or requested country) results
+            if country and (addr.get('country_code') or '').lower() != country:
+                continue
+            items.append({
+                "label": it.get('display_name'),
+                "lat": float(it.get('lat')) if it.get('lat') else None,
+                "lon": float(it.get('lon')) if it.get('lon') else None,
+                "city": addr.get('city') or addr.get('town') or addr.get('village') or addr.get('hamlet'),
+                "state": addr.get('state'),
+                "country": addr.get('country'),
+                "country_code": addr.get('country_code'),
+                "postcode": addr.get('postcode'),
+            })
+        return jsonify({"items": items})
+    except Exception as e:
+        logger.error(f"Geocode search error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/geocode/timezone', methods=['GET'])
+def geocode_timezone():
+    """
+    Given lat/lon, return timezone id via BigDataCloud (no key).
+    Query params:
+      - lat
+      - lon
+    """
+    try:
+        if not _requests:
+            return jsonify({"error": "requests module unavailable"}), 500
+        lat = request.args.get('lat')
+        lon = request.args.get('lon')
+        if not lat or not lon:
+            return jsonify({"error": "lat and lon required"}), 400
+        resp = _requests.get(
+            'https://api.bigdatacloud.net/data/timezone-by-location',
+            params={'latitude': lat, 'longitude': lon}
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        tz = data.get('ianaTimeId') or data.get('timeZone') or data.get('timeZoneId')
+        return jsonify({"timezone": tz})
+    except Exception as e:
+        logger.error(f"Timezone lookup error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ============= Health Check Endpoint =============
 
 @app.route('/api/health', methods=['GET'])

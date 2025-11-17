@@ -51,6 +51,7 @@ import {
   Dangerous as DangerousIcon,
 } from '@mui/icons-material';
 import { monitoringAPIv2, sitesConfigAPI } from '../services/api';
+import AddressAutocomplete from '../components/AddressAutocomplete';
 
 function SitesPage() {
   const [loading, setLoading] = useState(true);
@@ -1168,12 +1169,21 @@ function SitesPage() {
               sx={{ mb: 2 }}
               required
             />
-            <TextField
-              fullWidth
-              label="Address"
+            <AddressAutocomplete
               value={newSite.address}
-              onChange={(e) => setNewSite({ ...newSite, address: e.target.value })}
-              sx={{ mb: 2 }}
+              onChange={(val) => setNewSite({ ...newSite, address: val })}
+              onResolved={(data) => {
+                // Only auto-fill timezone (and coordinates); do not change address/city/state/country/zip
+                const tz = data.timezone
+                  ? { ...newSite.timezone, timezoneId: data.timezone }
+                  : newSite.timezone;
+                setNewSite({
+                  ...newSite,
+                  latitude: data.lat != null ? String(data.lat) : newSite.latitude,
+                  longitude: data.lon != null ? String(data.lon) : newSite.longitude,
+                  timezone: tz,
+                });
+              }}
             />
             <Grid container spacing={2}>
               <Grid item xs={6}>
@@ -1185,23 +1195,36 @@ function SitesPage() {
                 />
               </Grid>
               <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="State"
-                  value={newSite.state}
-                  onChange={(e) => setNewSite({ ...newSite, state: e.target.value })}
-                />
+                <FormControl fullWidth>
+                  <InputLabel>State</InputLabel>
+                  <Select
+                    label="State"
+                    value={newSite.state}
+                    onChange={(e) => setNewSite({ ...newSite, state: e.target.value })}
+                  >
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming','District of Columbia'].map(s => (
+                      <MenuItem key={s} value={s}>{s}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
             </Grid>
             <Grid container spacing={2} sx={{ mt: 0 }}>
               <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="Country"
-                  value={newSite.country}
-                  onChange={(e) => setNewSite({ ...newSite, country: e.target.value })}
-                  sx={{ mt: 2 }}
-                />
+                <FormControl fullWidth sx={{ mt: 2 }}>
+                  <InputLabel>Country</InputLabel>
+                  <Select
+                    label="Country"
+                    value={newSite.country}
+                    onChange={(e) => setNewSite({ ...newSite, country: e.target.value })}
+                  >
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {['United States','Canada','United Kingdom','Australia','Germany','France','Netherlands','India','Japan','Singapore','Brazil','Mexico'].map(c => (
+                      <MenuItem key={c} value={c}>{c}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
               <Grid item xs={6}>
                 <TextField
@@ -1309,12 +1332,21 @@ function SitesPage() {
               sx={{ mb: 2 }}
               required
             />
-            <TextField
-              fullWidth
-              label="Address"
+            <AddressAutocomplete
               value={newSite.address}
-              onChange={(e) => setNewSite({ ...newSite, address: e.target.value })}
-              sx={{ mb: 2 }}
+              onChange={(val) => setNewSite({ ...newSite, address: val })}
+              onResolved={(data) => {
+                // Only auto-fill timezone (and coordinates); do not change address/city/state/country/zip
+                const tz = data.timezone
+                  ? { ...newSite.timezone, timezoneId: data.timezone }
+                  : newSite.timezone;
+                setNewSite({
+                  ...newSite,
+                  latitude: data.lat != null ? String(data.lat) : newSite.latitude,
+                  longitude: data.lon != null ? String(data.lon) : newSite.longitude,
+                  timezone: tz,
+                });
+              }}
             />
             <Grid container spacing={2}>
               <Grid item xs={6}>
@@ -1326,23 +1358,36 @@ function SitesPage() {
                 />
               </Grid>
               <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="State"
-                  value={newSite.state}
-                  onChange={(e) => setNewSite({ ...newSite, state: e.target.value })}
-                />
+                <FormControl fullWidth>
+                  <InputLabel>State</InputLabel>
+                  <Select
+                    label="State"
+                    value={newSite.state}
+                    onChange={(e) => setNewSite({ ...newSite, state: e.target.value })}
+                  >
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming','District of Columbia'].map(s => (
+                      <MenuItem key={s} value={s}>{s}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
             </Grid>
             <Grid container spacing={2} sx={{ mt: 0 }}>
               <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="Country"
-                  value={newSite.country}
-                  onChange={(e) => setNewSite({ ...newSite, country: e.target.value })}
-                  sx={{ mt: 2 }}
-                />
+                <FormControl fullWidth sx={{ mt: 2 }}>
+                  <InputLabel>Country</InputLabel>
+                  <Select
+                    label="Country"
+                    value={newSite.country}
+                    onChange={(e) => setNewSite({ ...newSite, country: e.target.value })}
+                  >
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {['United States','Canada','United Kingdom','Australia','Germany','France','Netherlands','India','Japan','Singapore','Brazil','Mexico'].map(c => (
+                      <MenuItem key={c} value={c}>{c}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
               <Grid item xs={6}>
                 <TextField

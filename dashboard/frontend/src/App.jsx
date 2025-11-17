@@ -33,6 +33,7 @@ import GLLocationsPage from './pages/GLLocationsPage';
 import GLTagsPage from './pages/GLTagsPage';
 import GLSubscriptionsPage from './pages/GLSubscriptionsPage';
 import GLWorkspacesPage from './pages/GLWorkspacesPage';
+import GLUsersPage from './pages/GLUsersPage';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -253,7 +254,7 @@ function App() {
                   <Route path="/wlans" element={<WLANsPage />} />
                   <Route path="/configuration" element={<ConfigurationPage />} />
                   {/* GreenLake Users (MSP) */}
-                  <Route path="/gl/users" element={<UsersPage />} />
+                  <Route path="/gl/users" element={<GLUsersPage />} />
                   {/* Legacy path (optional) */}
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/nac" element={<NACPage />} />

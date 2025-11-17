@@ -294,6 +294,42 @@ export const userAPI = {
 };
 
 /**
+ * HPE GreenLake User Management API
+ * Backend routes implemented in dashboard/backend/app.py under /api/greenlake/*
+ */
+export const greenlakeUserAPI = {
+  list: async ({ filter = null, limit = 100, offset = 0 } = {}) => {
+    const params = { limit, offset };
+    if (filter) params.filter = filter;
+    const response = await apiClient.get('/greenlake/users', { params });
+    return response.data;
+  },
+
+  get: async (userId) => {
+    const response = await apiClient.get(`/greenlake/users/${encodeURIComponent(userId)}`);
+    return response.data;
+  },
+
+  update: async (userId, updateBody = {}) => {
+    const response = await apiClient.put(`/greenlake/users/${encodeURIComponent(userId)}`, updateBody);
+    return response.data;
+  },
+
+  delete: async (userId) => {
+    const response = await apiClient.delete(`/greenlake/users/${encodeURIComponent(userId)}`);
+    return response.data;
+  },
+
+  invite: async ({ email, sendWelcomeEmail = true }) => {
+    const response = await apiClient.post('/greenlake/users/invite', {
+      email,
+      sendWelcomeEmail: !!sendWelcomeEmail,
+    });
+    return response.data;
+  },
+};
+
+/**
  * Monitoring API
  */
 export const monitoringAPI = {
