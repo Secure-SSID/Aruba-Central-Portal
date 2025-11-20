@@ -310,7 +310,7 @@ function SitesPage() {
         combined = configData.map(configSite => {
           const configSiteId = configSite.scopeId || configSite.id;
           const healthSite = healthData.find(h => {
-            // Health API uses 'id' field (e.g., "54819475093")
+            // Health API uses 'id' field (e.g., "YOUR_SITE_ID")
             const healthSiteId = h.id || h.siteId || h.site_id;
             // Try both string and number comparison
             if (!healthSiteId || !configSiteId) return false;

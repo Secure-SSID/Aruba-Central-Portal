@@ -357,11 +357,29 @@ export const explorerAPI = {
 /**
  * Client Management API
  * Get connected wireless and wired clients
+ * If siteId is not provided, uses monitoring API to get all clients (same approach as SitesPage)
  */
 export const getClients = async (siteId) => {
   const params = siteId ? { site_id: siteId } : {};
-  const response = await apiClient.get('/clients', { params });
-  return response.data;
+  try {
+    const response = await apiClient.get('/clients', { params });
+    const data = response.data;
+    
+    // Check if this is an empty response from monitoring API (no site_id provided)
+    // Backend returns { count: 0, items: [], message: '...' } when monitoring endpoint not available
+    if (!siteId && data && data.count === 0 && (!data.items || data.items.length === 0) && data.message) {
+      // This is the "monitoring endpoint not available" response - throw to trigger fallback
+      throw new Error('Monitoring clients endpoint not available');
+    }
+    
+    return data;
+  } catch (error) {
+    // If no siteId and request fails, throw to allow fallback logic
+    if (!siteId && error.response?.status === 400) {
+      throw new Error('Monitoring clients endpoint not available');
+    }
+    throw error;
+  }
 };
 
 export const getClientTrends = async (siteId) => {

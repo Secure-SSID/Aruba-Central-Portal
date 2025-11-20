@@ -65,18 +65,24 @@ function DevicesPage() {
       if (devicesData.status === 'fulfilled') {
         const deviceList = devicesData.value.devices || devicesData.value.items || [];
         setDevices(deviceList);
+      } else {
+        console.warn('Failed to fetch devices:', devicesData.reason);
       }
 
       // Process switches
       if (switchesData.status === 'fulfilled') {
         const switchList = switchesData.value.switches || switchesData.value.items || [];
         setSwitches(switchList);
+      } else {
+        console.warn('Failed to fetch switches:', switchesData.reason);
       }
 
       // Process APs
       if (apsData.status === 'fulfilled') {
         const apList = apsData.value.aps || apsData.value.items || [];
         setAccessPoints(apList);
+      } else {
+        console.warn('Failed to fetch access points:', apsData.reason);
       }
 
       // Process Gateways
@@ -94,6 +100,8 @@ function DevicesPage() {
           deviceType: g.deviceType || 'Gateway',
         }));
         setGateways(normalized);
+      } else {
+        console.warn('Failed to fetch gateways:', gatewaysData.reason);
       }
     } catch (err) {
       setError(err.message || 'Failed to load devices');

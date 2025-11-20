@@ -121,13 +121,13 @@ GET /network-monitoring/v1alpha1/aps
 GET /network-monitoring/v1alpha1/aps?limit=50
 
 # Filter by site
-GET /network-monitoring/v1alpha1/aps?filter=siteId eq '12345'
+GET /network-monitoring/v1alpha1/aps?filter=siteId eq 'YOUR_SITE_ID'
 
 # Filter by status
 GET /network-monitoring/v1alpha1/aps?filter=status eq 'Up'
 
 # Multiple filters
-GET /network-monitoring/v1alpha1/aps?filter=status eq 'Up' and siteId eq '12345'
+GET /network-monitoring/v1alpha1/aps?filter=status eq 'Up' and siteId eq 'YOUR_SITE_ID'
 
 # Filter using 'in' operator
 GET /network-monitoring/v1alpha1/aps?filter=serialNumber in ('ABC123', 'DEF456')
@@ -207,7 +207,7 @@ GET /network-monitoring/v1alpha1/sites-health
   "count": 1,
   "items": [
     {
-      "siteId": "54819475093",
+      "siteId": "YOUR_SITE_ID",
       "siteName": "Main Office",
       "deviceCount": 9,
       "apCount": 5,
@@ -391,7 +391,7 @@ Several endpoints accept an optional `site-id` query parameter. The correct form
 
 ```bash
 # Correct (hyphenated)
-/clients?site-id=54819475093
+/clients?site-id=YOUR_SITE_ID
 
 # Not site_id (underscore) - this won't work as expected
 ```

@@ -56,17 +56,17 @@ Fetching customer/tenant accounts...
 ╭─────────────────────── MSP Customer/Tenant Accounts ───────────────────────╮
 │ Customer ID  │ Customer Name     │ Description        │ Status              │
 ├──────────────┼───────────────────┼────────────────────┼─────────────────────┤
-│ CUST001      │ Acme Corp         │ Main customer      │ provisioned         │
-│ CUST002      │ Widget Inc        │ Secondary customer │ provisioned         │
+│ CUST001      │ Example Company   │ Main customer      │ provisioned         │
+│ CUST002      │ Example Corp      │ Secondary customer │ provisioned         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
 Total Customers: 2
 
 Fetching user details for each customer...
 
-Processing: Acme Corp (ID: CUST001)
+Processing: Example Company (ID: CUST001)
 
-╭─────────────────── Users for Acme Corp ───────────────────╮
+╭─────────────────── Users for Example Company ───────────────────╮
 │ Username    │ Email              │ Status │ MSP Role │ Tenant Role │
 ├─────────────┼────────────────────┼────────┼──────────┼─────────────┤
 │ user1       │ user1@acme.com     │ active │ admin    │ admin       │
@@ -175,7 +175,7 @@ To audit specific customers only, add filtering logic:
 ```python
 customers = get_all_customers(client)
 # Filter for specific customer names
-customers = [c for c in customers if c.get("customer_name") in ["Acme Corp", "Widget Inc"]]
+customers = [c for c in customers if c.get("customer_name") in ["Example Company", "Example Corp"]]
 ```
 
 ## Export Options

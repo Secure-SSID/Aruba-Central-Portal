@@ -295,7 +295,7 @@ function ConfigurationPage() {
     } else if (operation === 'group-assign') {
       csvContent = 'serial,group\nCN12345678,campus-wifi\nCN87654321,guest-wifi';
     } else if (operation === 'site-assign') {
-      csvContent = 'serial,site_id\nCN12345678,54819475093\nCN87654321,54819475093';
+      csvContent = 'serial,site_id\nCN12345678,YOUR_SITE_ID\nCN87654321,YOUR_SITE_ID';
     }
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -445,9 +445,9 @@ function ConfigurationPage() {
               CSV Format for {bulkOperation}:
             </Typography>
             <Typography variant="body2" component="pre" sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-              {bulkOperation === 'ap-rename' && 'serial,new_name\nCN12345678,Building-A-AP-01'}
-              {bulkOperation === 'group-assign' && 'serial,group\nCN12345678,campus-wifi'}
-              {bulkOperation === 'site-assign' && 'serial,site_id\nCN12345678,54819475093'}
+              {bulkOperation === 'ap-rename' && 'serial,new_name\nSERIAL_NUMBER_1,DEVICE_NAME_1'}
+              {bulkOperation === 'group-assign' && 'serial,group\nSERIAL_NUMBER_1,GROUP_NAME_1'}
+              {bulkOperation === 'site-assign' && 'serial,site_id\nSERIAL_NUMBER_1,YOUR_SITE_ID'}
             </Typography>
           </Alert>
         )}

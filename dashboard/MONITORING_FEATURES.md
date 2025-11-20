@@ -258,7 +258,7 @@ const cpuData = await monitoringAPIv2.getAPCPU(serial, {
 
 // Get top applications
 const apps = await monitoringAPIv2.getTopApplications({
-  site_id: '12345',
+  site_id: 'YOUR_SITE_ID',
   limit: 10
 });
 

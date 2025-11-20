@@ -100,3 +100,11 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+
+# Output directory (sessions, logs, etc.)
+output/
+*.pid
+
+# Backup files
+*.bak
+.env.bak

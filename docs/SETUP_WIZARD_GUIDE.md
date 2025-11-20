@@ -137,7 +137,7 @@ ARUBA_BASE_URL=https://internal.api.central.arubanetworks.com
 # OAuth2 Credentials
 ARUBA_CLIENT_ID=abc123def456ghi789jkl012mno345
 ARUBA_CLIENT_SECRET=xyz789uvw456rst123opq789lmn456
-ARUBA_CUSTOMER_ID=a1b2c3d4e5f6g7h8i9j0
+ARUBA_CUSTOMER_ID=your_customer_id_here
 ```
 
 **Location**: `/home/user/Aruba-Central-Portal/.env`
@@ -237,7 +237,7 @@ POST /api/setup/configure
 Body: {
   "client_id": "abc123...",
   "client_secret": "xyz789...",
-  "customer_id": "a1b2c3...",
+  "customer_id": "your_customer_id_here",
   "base_url": "https://internal.api.central.arubanetworks.com"
 }
 Response: {
