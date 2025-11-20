@@ -1881,7 +1881,7 @@ const COMMON_ENDPOINTS = [
     method: 'POST',
     description: 'Start an AP ranging scan (USE WITH CAUTION)',
     params: {},
-    body: { ap_serial: 'CNGTJ0TDT7' },
+    body: { ap_serial: 'SERIAL123456' },
     notes: 'Body: {ap_serial}. Use with caution!',
     category: 'Services'
   },
@@ -3081,7 +3081,7 @@ function APIExplorerPage() {
                   if (endpointLower === '/network-monitoring/v1alpha1/radios' || endpointLower.startsWith('/network-monitoring/v1alpha1/radios?')) {
                     return {
                       ...commonParams,
-                      'filter': { type: 'string', description: 'OData filter expression. Can filter by AP serial, radio band, etc. Operators: eq, in. Only "and" conjunction supported.', example: { filter: "apSerial eq 'CNGTJ0TDT7'" }, required: false },
+                      'filter': { type: 'string', description: 'OData filter expression. Can filter by AP serial, radio band, etc. Operators: eq, in. Only "and" conjunction supported.', example: { filter: "apSerial eq 'SERIAL123456'" }, required: false },
                     };
                   }
                   
@@ -3156,14 +3156,14 @@ function APIExplorerPage() {
                     if (endpointLower.includes('/firewall/sessions')) {
                       return {
                         ...commonParams,
-                        'gateway_serial': { type: 'string', description: 'Filter by gateway serial number', example: { gateway_serial: 'CNGTJ0TDT7' }, required: false },
+                        'gateway_serial': { type: 'string', description: 'Filter by gateway serial number', example: { gateway_serial: 'SERIAL123456' }, required: false },
                         'client_mac': { type: 'string', description: 'Filter by client MAC address', example: { client_mac: '00:11:22:33:44:55' }, required: false },
                       };
                     }
                     if (endpointLower.includes('/firewall/clients')) {
                       return {
                         ...commonParams,
-                        'gateway_serial': { type: 'string', description: 'Filter by gateway serial number', example: { gateway_serial: 'CNGTJ0TDT7' }, required: false },
+                        'gateway_serial': { type: 'string', description: 'Filter by gateway serial number', example: { gateway_serial: 'SERIAL123456' }, required: false },
                       };
                     }
                     return {
@@ -3443,11 +3443,11 @@ function APIExplorerPage() {
                                       { label: 'Filter by status (Up, Down)', example: { filter: "status eq 'Up'" } },
                                       { label: 'Filter by model (e.g., 505, 515)', example: { filter: "model eq '505'" } },
                                       { label: 'Filter by device name', example: { filter: "deviceName eq 'AP-505-01'" } },
-                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'CNGTJ0TDT7'" } },
+                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'SERIAL123456'" } },
                                       { label: 'Filter by cluster ID', example: { filter: "clusterId eq 'cluster-123'" } },
                                       { label: 'Filter by cluster name', example: { filter: "clusterName eq 'Main Cluster'" } },
                                       { label: 'Filter by deployment type', example: { filter: "deployment eq 'branch'" } },
-                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                       { label: 'Filter by status and site together', example: { filter: "status eq 'Up' and siteId eq 'YOUR_SITE_ID'" } },
                                       { label: 'Filter by model and status', example: { filter: "model eq '505' and status eq 'Up'" } },
                                     ];
@@ -3471,8 +3471,8 @@ function APIExplorerPage() {
                                         { label: 'Filter by status (Up, Down)', example: { filter: "deviceType eq 'SWITCH' and status eq 'Up'" } },
                                         { label: 'Filter by model', example: { filter: "deviceType eq 'SWITCH' and model eq '2930F'" } },
                                         { label: 'Filter by device name', example: { filter: "deviceType eq 'SWITCH' and deviceName eq 'switch-01'" } },
-                                        { label: 'Filter by serial number', example: { filter: "deviceType eq 'SWITCH' and serialNumber eq 'CNGTJ0TDT7'" } },
-                                        { label: 'Filter multiple serials using \'in\' operator', example: { filter: "deviceType eq 'SWITCH' and serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                        { label: 'Filter by serial number', example: { filter: "deviceType eq 'SWITCH' and serialNumber eq 'SERIAL123456'" } },
+                                        { label: 'Filter multiple serials using \'in\' operator', example: { filter: "deviceType eq 'SWITCH' and serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                         { label: 'Filter by status and site together', example: { filter: "deviceType eq 'SWITCH' and status eq 'Up' and siteId eq 'YOUR_SITE_ID'" } },
                                         { label: 'Filter by model and status', example: { filter: "deviceType eq 'SWITCH' and model eq '2930F' and status eq 'Up'" } },
                                       ];
@@ -3485,8 +3485,8 @@ function APIExplorerPage() {
                                         { label: 'Filter by status (Up, Down)', example: { filter: "deviceType eq 'GATEWAY' and status eq 'Up'" } },
                                         { label: 'Filter by model', example: { filter: "deviceType eq 'GATEWAY' and model eq '7005'" } },
                                         { label: 'Filter by device name', example: { filter: "deviceType eq 'GATEWAY' and deviceName eq 'gateway-01'" } },
-                                        { label: 'Filter by serial number', example: { filter: "deviceType eq 'GATEWAY' and serialNumber eq 'CNGTJ0TDT7'" } },
-                                        { label: 'Filter multiple serials using \'in\' operator', example: { filter: "deviceType eq 'GATEWAY' and serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                        { label: 'Filter by serial number', example: { filter: "deviceType eq 'GATEWAY' and serialNumber eq 'SERIAL123456'" } },
+                                        { label: 'Filter multiple serials using \'in\' operator', example: { filter: "deviceType eq 'GATEWAY' and serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                         { label: 'Filter by status and site together', example: { filter: "deviceType eq 'GATEWAY' and status eq 'Up' and siteId eq 'YOUR_SITE_ID'" } },
                                       ];
                                     }
@@ -3497,12 +3497,12 @@ function APIExplorerPage() {
                                       { label: 'Filter by status (Up, Down)', example: { filter: "status eq 'Up'" } },
                                       { label: 'Filter by site', example: { filter: "siteId eq 'YOUR_SITE_ID'" } },
                                       { label: 'Filter by model', example: { filter: "model eq '505'" } },
-                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'CNGTJ0TDT7'" } },
+                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'SERIAL123456'" } },
                                       { label: 'Filter by device name', example: { filter: "deviceName eq 'switch-01'" } },
                                       { label: 'Filter multiple device types', example: { filter: "deviceType in ('SWITCH', 'AP')" } },
-                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                       { label: 'Filter by deviceType and status', example: { filter: "deviceType eq 'SWITCH' and status eq 'Up'" } },
-                                      { label: 'Filter by deviceType, serialNumber, and deviceName together', example: { filter: "deviceType eq 'SWITCH' and serialNumber eq 'CNGTJ0TDT7' and deviceName eq 'switch-01'" } },
+                                      { label: 'Filter by deviceType, serialNumber, and deviceName together', example: { filter: "deviceType eq 'SWITCH' and serialNumber eq 'SERIAL123456' and deviceName eq 'switch-01'" } },
                                     ];
                                   }
                                   
@@ -3513,8 +3513,8 @@ function APIExplorerPage() {
                                       { label: 'Filter by status (Up, Down)', example: { filter: "status eq 'Up'" } },
                                       { label: 'Filter by model', example: { filter: "model eq '2930F'" } },
                                       { label: 'Filter by device name', example: { filter: "deviceName eq 'switch-01'" } },
-                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'CNGTJ0TDT7'" } },
-                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'SERIAL123456'" } },
+                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                       { label: 'Filter by status and site together', example: { filter: "status eq 'Up' and siteId eq 'YOUR_SITE_ID'" } },
                                       { label: 'Filter by model and status', example: { filter: "model eq '2930F' and status eq 'Up'" } },
                                     ];
@@ -3527,8 +3527,8 @@ function APIExplorerPage() {
                                       { label: 'Filter by status (Up, Down)', example: { filter: "status eq 'Up'" } },
                                       { label: 'Filter by model', example: { filter: "model eq '7005'" } },
                                       { label: 'Filter by device name', example: { filter: "deviceName eq 'gateway-01'" } },
-                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'CNGTJ0TDT7'" } },
-                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'SERIAL123456'" } },
+                                      { label: 'Filter multiple serials using \'in\' operator', example: { filter: "serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                       { label: 'Filter by status and site together', example: { filter: "status eq 'Up' and siteId eq 'YOUR_SITE_ID'" } },
                                     ];
                                   }
@@ -3539,7 +3539,7 @@ function APIExplorerPage() {
                                       { label: 'Filter by site', example: { filter: "siteId eq 'YOUR_SITE_ID'" } },
                                       { label: 'Filter by MAC address', example: { filter: "macAddress eq '00:11:22:33:44:55'" } },
                                       { label: 'Filter by SSID/WLAN name', example: { filter: "ssid eq 'MyNetwork'" } },
-                                      { label: 'Filter by AP serial', example: { filter: "apSerial eq 'CNGTJ0TDT7'" } },
+                                      { label: 'Filter by AP serial', example: { filter: "apSerial eq 'SERIAL123456'" } },
                                       { label: 'Filter by connection status', example: { filter: "status eq 'Connected'" } },
                                       { label: 'Filter multiple MACs using \'in\' operator', example: { filter: "macAddress in ('00:11:22:33:44:55', 'AA:BB:CC:DD:EE:FF')" } },
                                       { label: 'Filter by site and SSID together', example: { filter: "siteId eq 'YOUR_SITE_ID' and ssid eq 'MyNetwork'" } },
@@ -3552,7 +3552,7 @@ function APIExplorerPage() {
                                       { label: 'Filter by site', example: { filter: "siteId eq 'YOUR_SITE_ID'" } },
                                       { label: 'Filter by severity (critical, major, minor, warning, info)', example: { filter: "severity eq 'critical'" } },
                                       { label: 'Filter by status (active, acknowledged, resolved)', example: { filter: "status eq 'active'" } },
-                                      { label: 'Filter by device serial', example: { filter: "deviceSerial eq 'CNGTJ0TDT7'" } },
+                                      { label: 'Filter by device serial', example: { filter: "deviceSerial eq 'SERIAL123456'" } },
                                       { label: 'Filter by alert type', example: { filter: "alertType eq 'device_down'" } },
                                       { label: 'Filter by severity and status', example: { filter: "severity eq 'critical' and status eq 'active'" } },
                                       { label: 'Filter by site and severity', example: { filter: "siteId eq 'YOUR_SITE_ID' and severity eq 'critical'" } },
@@ -3571,7 +3571,7 @@ function APIExplorerPage() {
                                   // Radios endpoint
                                   if (endpointLower === '/network-monitoring/v1alpha1/radios' || endpointLower.startsWith('/network-monitoring/v1alpha1/radios?')) {
                                     return [
-                                      { label: 'Filter by AP serial', example: { filter: "apSerial eq 'CNGTJ0TDT7'" } },
+                                      { label: 'Filter by AP serial', example: { filter: "apSerial eq 'SERIAL123456'" } },
                                       { label: 'Filter by radio band (2.4GHz, 5GHz, 6GHz)', example: { filter: "band eq '5GHz'" } },
                                       { label: 'Filter by radio status', example: { filter: "status eq 'Up'" } },
                                     ];
@@ -3599,7 +3599,7 @@ function APIExplorerPage() {
                                   if (endpointLower.includes('/services/v1alpha1/location/devices') && !endpointLower.includes('/devices/')) {
                                     return [
                                       { label: 'Filter by device type', example: { filter: "deviceType eq 'AP'" } },
-                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'CNGTJ0TDT7'" } },
+                                      { label: 'Filter by serial number', example: { filter: "serialNumber eq 'SERIAL123456'" } },
                                       { label: 'Filter by site', example: { filter: "siteId eq 'YOUR_SITE_ID'" } },
                                     ];
                                   }
@@ -3667,9 +3667,9 @@ function APIExplorerPage() {
                                     { label: 'Filter by site', example: { filter: "siteId eq 'YOUR_SITE_ID'" } },
                                     { label: 'Filter by status', example: { filter: "status eq 'Up'" } },
                                     { label: 'Filter by model', example: { filter: "model eq '505'" } },
-                                    { label: 'Filter by serial number', example: { filter: "serialNumber eq 'CNGTJ0TDT7'" } },
+                                    { label: 'Filter by serial number', example: { filter: "serialNumber eq 'SERIAL123456'" } },
                                     { label: 'Filter by device name', example: { filter: "deviceName eq 'device-01'" } },
-                                    { label: 'Filter multiple values using \'in\' operator', example: { filter: "serialNumber in ('CNGTJ0TDT7', 'ABC123', 'DEF456')" } },
+                                    { label: 'Filter multiple values using \'in\' operator', example: { filter: "serialNumber in ('SERIAL123456', 'ABC123', 'DEF456')" } },
                                     { label: 'Filter by multiple conditions', example: { filter: "status eq 'Up' and siteId eq 'YOUR_SITE_ID'" } },
                                   ];
                                 };
