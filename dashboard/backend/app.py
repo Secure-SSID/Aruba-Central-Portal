@@ -1080,11 +1080,11 @@ def api_explorer():
                 logger.info(f"🔍 API Explorer: Endpoint={endpoint}, Params={params}")
                 response = aruba_client.get(endpoint, params=params)
             elif method == 'POST':
-                response = aruba_client.post(endpoint, json=body)
+                response = aruba_client.post(endpoint, data=body, params=params)
             elif method == 'PUT':
-                response = aruba_client.put(endpoint, json=body)
+                response = aruba_client.put(endpoint, data=body, params=params)
             elif method == 'DELETE':
-                response = aruba_client.delete(endpoint)
+                response = aruba_client.delete(endpoint, params=params)
             else:
                 return jsonify({"error": f"Unsupported method: {method}"}), 400
 

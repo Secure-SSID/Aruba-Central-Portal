@@ -2926,6 +2926,105 @@ function APIExplorerPage() {
                 const { basePath } = parseEndpoint(currentEndpoint);
                 const endpointLower = basePath.toLowerCase();
                 
+                // Extract path parameters (like {serial}, {mac}, {alert_id}, etc.)
+                const getPathParameters = () => {
+                  const pathParams = [];
+                  const pathParamMatches = basePath.matchAll(/\{([^}]+)\}/g);
+                  
+                  for (const match of pathParamMatches) {
+                    const paramName = match[1];
+                    const paramValue = match[0]; // {serial}, {mac}, etc.
+                    
+                    // Determine description based on parameter name
+                    let description = '';
+                    let example = '';
+                    
+                    if (paramName.toLowerCase().includes('serial')) {
+                      description = 'Device serial number (required in path)';
+                      example = 'SERIAL123456';
+                    } else if (paramName.toLowerCase().includes('mac')) {
+                      description = 'Client MAC address (required in path, format: XX:XX:XX:XX:XX:XX)';
+                      example = '00:11:22:33:44:55';
+                    } else if (paramName.toLowerCase().includes('alert')) {
+                      description = 'Alert ID (required in path)';
+                      example = 'alert-12345';
+                    } else if (paramName.toLowerCase().includes('site')) {
+                      description = 'Site ID (required in path)';
+                      example = '12345678901';
+                    } else if (paramName.toLowerCase().includes('wlan') || paramName.toLowerCase().includes('ssid')) {
+                      description = 'WLAN/SSID name (required in path)';
+                      example = 'MyNetwork';
+                    } else if (paramName.toLowerCase().includes('swarm')) {
+                      description = 'Swarm ID (required in path)';
+                      example = 'swarm-123';
+                    } else if (paramName.toLowerCase().includes('threat')) {
+                      description = 'Threat ID (required in path)';
+                      example = 'threat-123';
+                    } else if (paramName.toLowerCase().includes('tunnel')) {
+                      description = 'Tunnel ID (required in path)';
+                      example = 'tunnel-123';
+                    } else if (paramName.toLowerCase().includes('radio')) {
+                      description = 'Radio ID (required in path)';
+                      example = 'radio-0';
+                    } else if (paramName.toLowerCase().includes('port')) {
+                      description = 'Port ID (required in path)';
+                      example = 'port-1';
+                    } else if (paramName.toLowerCase().includes('interface')) {
+                      description = 'Interface ID (required in path)';
+                      example = 'interface-1';
+                    } else if (paramName.toLowerCase().includes('vlan')) {
+                      description = 'VLAN ID (required in path)';
+                      example = '100';
+                    } else if (paramName.toLowerCase().includes('uplink')) {
+                      description = 'Uplink ID (required in path)';
+                      example = 'uplink-1';
+                    } else if (paramName.toLowerCase().includes('probe')) {
+                      description = 'Probe ID (required in path)';
+                      example = 'probe-1';
+                    } else if (paramName.toLowerCase().includes('member')) {
+                      description = 'Member ID (required in path)';
+                      example = 'member-1';
+                    } else if (paramName.toLowerCase().includes('stack')) {
+                      description = 'Stack ID (required in path)';
+                      example = 'stack-1';
+                    } else if (paramName.toLowerCase().includes('test')) {
+                      description = 'Test ID (required in path)';
+                      example = 'test-12345';
+                    } else if (paramName.toLowerCase().includes('report')) {
+                      description = 'Report ID (required in path)';
+                      example = 'report-123';
+                    } else if (paramName.toLowerCase().includes('run')) {
+                      description = 'Run ID (required in path)';
+                      example = 'run-123';
+                    } else if (paramName.toLowerCase().includes('scan')) {
+                      description = 'Scan ID (required in path)';
+                      example = 'scan-123';
+                    } else if (paramName.toLowerCase().includes('tag')) {
+                      description = 'Tag ID (required in path)';
+                      example = 'tag-123';
+                    } else if (paramName.toLowerCase().includes('location')) {
+                      description = 'Location ID (required in path)';
+                      example = 'location-123';
+                    } else {
+                      description = `${paramName} (required in path)`;
+                      example = `${paramName}-123`;
+                    }
+                    
+                    pathParams.push({
+                      name: paramValue,
+                      paramName: paramName,
+                      description: description,
+                      example: example,
+                      required: true,
+                      type: 'path parameter'
+                    });
+                  }
+                  
+                  return pathParams;
+                };
+                
+                const pathParameters = getPathParameters();
+                
                 // Determine available parameters based on endpoint pattern
                 const getAvailableParams = () => {
                   // Common parameters for most endpoints
@@ -3364,13 +3463,82 @@ function APIExplorerPage() {
                 
                 return (
                   <Box>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      Available query parameters for <code>{basePath}</code>:
+                    {/* Path Parameters Section */}
+                    {pathParameters.length > 0 && (
+                      <Box sx={{ mb: 4 }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontWeight: 600 }}>
+                          Required Path Parameters:
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block', fontStyle: 'italic' }}>
+                          These parameters must be included in the endpoint path. Replace the placeholders (e.g., {'{serial}'}) with actual values.
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {pathParameters.map((pathParam, idx) => (
+                            <Box 
+                              key={idx}
+                              sx={{ 
+                                p: 2, 
+                                bgcolor: 'rgba(25, 118, 210, 0.08)', 
+                                borderRadius: 1,
+                                border: '1px solid rgba(25, 118, 210, 0.2)'
+                              }}
+                            >
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                                <Typography variant="subtitle2" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'primary.main' }}>
+                                  {pathParam.name}
+                                </Typography>
+                                <Chip 
+                                  label="Path Parameter" 
+                                  size="small" 
+                                  sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'primary.main', color: 'white' }}
+                                />
+                                <Chip 
+                                  label="Required" 
+                                  size="small" 
+                                  color="error"
+                                  sx={{ height: 20, fontSize: '0.7rem', fontWeight: 'bold' }}
+                                />
+                              </Box>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                {pathParam.description}
+                              </Typography>
+                              <Box sx={{ mt: 1 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                  Example value:
+                                </Typography>
+                                <Box sx={{ 
+                                  p: 1, 
+                                  bgcolor: 'rgba(0, 0, 0, 0.05)', 
+                                  borderRadius: 0.5,
+                                  fontFamily: 'monospace',
+                                  fontSize: '0.875rem',
+                                }}>
+                                  {pathParam.example}
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}>
+                                  Replace <code>{pathParam.name}</code> in the endpoint path with: <code>{pathParam.example}</code>
+                                </Typography>
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+                    
+                    {/* Query Parameters Section */}
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontWeight: pathParameters.length > 0 ? 600 : 'normal' }}>
+                      {pathParameters.length > 0 ? 'Query Parameters (Optional):' : 'Available query parameters for'} <code>{basePath}</code>:
                     </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block', fontStyle: 'italic' }}>
-                      You can combine multiple parameters. Example with multiple params shown below.
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {paramEntries.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No query parameters available for this endpoint.
+                      </Typography>
+                    ) : (
+                      <>
+                        <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block', fontStyle: 'italic' }}>
+                          You can combine multiple parameters. Example with multiple params shown below.
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {paramEntries.map(([paramName, paramInfo]) => (
                         <Box 
                           key={paramName}
@@ -3763,6 +3931,8 @@ function APIExplorerPage() {
                           )}
                         </Box>
                       </Box>
+                    )}
+                      </>
                     )}
                   </Box>
                 );
