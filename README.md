@@ -58,6 +58,7 @@ pip install -r requirements.txt
 | **[UGREEN_NAS_SETUP.md](UGREEN_NAS_SETUP.md)** | Ugreen NAS guide | NAS users |
 | **[UPDATE_DOCKER_CONTAINER.md](UPDATE_DOCKER_CONTAINER.md)** | Update guide | Operations |
 | **[CONFIGURATION.md](docs/CONFIGURATION.md)** | Configuration reference | Advanced users |
+| **[HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)** | Complete system architecture & process flow | Developers ⭐ |
 | **[FEATURES.md](dashboard/FEATURES.md)** | Feature list | Everyone |
 
 ---
