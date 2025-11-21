@@ -1,0 +1,13 @@
+# Aruba Central API Configuration
+# Environment variables in .env will override these settings
+
+aruba_central:
+  base_url: "https://apigw-prod2.central.arubanetworks.com"
+  # client_id, client_secret, customer_id should be set in .env
+
+# Script-specific settings
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Add your custom configuration here

@@ -1,0 +1,63 @@
+services:
+  # Main Dashboard Service (Web UI + API)
+  aruba-central-portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aruba-central-portal
+    restart: unless-stopped
+    ports:
+      - "1344:1344"
+    user: "${PUID:-0}:${PGID:-0}"  # Use PUID/PGID from .env, default to root (0:0)
+    env_file:
+      - .env
+    environment:
+      # Application Configuration
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      # Persist token cache to avoid hitting rate limits
+      - token-cache:/app/data
+      # Persist .env file for Setup Wizard
+      - ./.env:/app/.env:rw
+      # Output directory for exports
+      - ./output:/app/output
+    networks:
+      - aruba-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:1344/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "com.ugreen.description=Aruba Central Portal Dashboard"
+      - "com.ugreen.version=1.0.0"
+
+  # Development Service (Optional - for script development)
+  aruba-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aruba-central-dev
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - token-cache:/app/data
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    networks:
+      - aruba-network
+    profiles:
+      - dev  # Only starts when explicitly requested with --profile dev
+
+volumes:
+  token-cache:
+    driver: local
+
+networks:
+  aruba-network:
+    driver: bridge

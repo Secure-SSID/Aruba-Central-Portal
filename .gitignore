@@ -1,0 +1,110 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+config.local.yaml
+
+# Token cache
+.token_cache*.json
+*.token_cache.json
+
+# Sensitive data
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dashboard frontend
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+dashboard/frontend/build/
+
+# Dashboard backend
+dashboard/backend/venv/
+
+# User-specific files and Claude Code
+.claude/
+
+# Exported data
+*.csv
+*.xlsx
+*_export.*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
+*.cache
+
+# Docker
+.docker/
+docker-compose.override.yml
+docker-compose.local.yml
+*.dockerfile.local
+build-docker.sh
+
+# Docker volumes and data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Output directory (sessions, logs, etc.)
+output/
+*.pid
+
+# Backup files
+*.bak
+.env.bak
