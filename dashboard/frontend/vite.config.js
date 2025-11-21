@@ -28,10 +28,10 @@ export default defineConfig({
     }),
   ].filter(Boolean),
   server: {
-    port: 3000,
+    port: 1344,
     proxy: {
       '/api': {
-        target: 'http://localhost:1344',
+        target: 'http://localhost:5000',
         changeOrigin: true,
       }
     }

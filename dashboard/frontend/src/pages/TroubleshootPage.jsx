@@ -27,6 +27,10 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   NetworkCheck as NetworkCheckIcon,
@@ -45,6 +49,9 @@ import {
   LocationOn as LocationIcon,
   RestartAlt as RestartIcon,
   Route as RouteIcon,
+  Update as UpdateIcon,
+  HealthAndSafety as HealthAndSafetyIcon,
+  Build as BuildIcon,
 } from '@mui/icons-material';
 import { troubleshootAPI, deviceAPI, showCommandsAPI } from '../services/api';
 import DeviceSelector from '../components/DeviceSelector';
@@ -599,7 +606,7 @@ function TroubleshootPage() {
         const formattedOutput = formatPingResults(data);
         return (
           <Box>
-            <Chip label="Ping Results" size="small" sx={{ mb: 2 }} />
+            <Chip label="Ping Results" size="small" sx={{ mb: 1 }} />
             <Paper 
               variant="outlined" 
               sx={{ 
@@ -703,7 +710,7 @@ function TroubleshootPage() {
         if (data.output.includes('PING') || data.output.includes('ping statistics')) {
           return (
             <Box>
-              <Chip label="Ping Results" size="small" sx={{ mb: 2 }} />
+              <Chip label="Ping Results" size="small" sx={{ mb: 1 }} />
               <Paper 
                 variant="outlined" 
                 sx={{ 
@@ -856,25 +863,25 @@ function TroubleshootPage() {
       // Always show formatted output (never fall through to JSON)
       return (
         <Box>
-          <Chip label="AP Diagnostics" size="small" sx={{ mb: 2 }} color="primary" />
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 600, overflow: 'auto' }}>
+          <Chip label="AP Diagnostics" size="small" sx={{ mb: 1 }} color="primary" />
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 600, overflow: 'auto' }}>
             {/* Show categorized sections */}
             {Object.entries(availableSections).map(([sectionName, fields]) => (
-              <Paper key={sectionName} variant="outlined" sx={{ p: 2, bgcolor: 'background.paper' }}>
+              <Paper key={sectionName} variant="outlined" sx={{ p: 1.5, bgcolor: 'background.paper' }}>
                 <Typography 
                   variant="subtitle2" 
                   sx={{ 
                     fontWeight: 600, 
-                    mb: 1.5, 
+                    mb: 1, 
                     color: 'primary.main',
                     borderBottom: '1px solid',
                     borderColor: 'divider',
-                    pb: 1
+                    pb: 0.5
                   }}
                 >
                   {sectionName}
                 </Typography>
-                <Grid container spacing={2}>
+                <Grid container spacing={1}>
                   {fields.map((key) => (
                     <Grid item xs={12} sm={6} key={key}>
                       <Box sx={{ mb: 1 }}>
@@ -910,21 +917,21 @@ function TroubleshootPage() {
             
             {/* Show remaining fields that weren't categorized */}
             {remainingFields.length > 0 && (
-              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper' }}>
+              <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'background.paper' }}>
                 <Typography 
                   variant="subtitle2" 
                   sx={{ 
                     fontWeight: 600, 
-                    mb: 1.5, 
+                    mb: 1, 
                     color: 'primary.main',
                     borderBottom: '1px solid',
                     borderColor: 'divider',
-                    pb: 1
+                    pb: 0.5
                   }}
                 >
                   Additional Information
                 </Typography>
-                <Grid container spacing={2}>
+                <Grid container spacing={1}>
                   {remainingFields.map((key) => (
                     <Grid item xs={12} sm={6} key={key}>
                       <Box sx={{ mb: 1 }}>
@@ -973,11 +980,11 @@ function TroubleshootPage() {
     if (typeof data === 'string') {
       return (
         <Box>
-          <Chip label="Text Output" size="small" sx={{ mb: 2 }} />
+          <Chip label="Text Output" size="small" sx={{ mb: 1 }} />
           <Paper 
             variant="outlined" 
             sx={{ 
-              p: 2, 
+              p: 1.5, 
               bgcolor: 'background.paper',
               fontFamily: 'monospace',
               fontSize: '0.875rem',
@@ -999,11 +1006,11 @@ function TroubleshootPage() {
     if (data.configuration && typeof data.configuration === 'string') {
       return (
         <Box>
-          <Chip label="Configuration" size="small" sx={{ mb: 2 }} />
+          <Chip label="Configuration" size="small" sx={{ mb: 1 }} />
           <Paper 
             variant="outlined" 
             sx={{ 
-              p: 2, 
+              p: 1.5, 
               bgcolor: 'background.paper',
               fontFamily: 'monospace',
               fontSize: '0.875rem',
@@ -1043,7 +1050,7 @@ function TroubleshootPage() {
         }
         return (
           <Box>
-            <Chip label={`${data.length} items`} size="small" sx={{ mb: 2 }} />
+            <Chip label={`${data.length} items`} size="small" sx={{ mb: 1 }} />
             <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 500 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
@@ -1077,8 +1084,8 @@ function TroubleshootPage() {
       // Simple array
       return (
         <Box>
-          <Chip label={`Array (${data.length} items)`} size="small" sx={{ mb: 2 }} />
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper', color: 'text.primary' }}>
+            <Chip label={`Array (${data.length} items)`} size="small" sx={{ mb: 1 }} />
+          <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'background.paper', color: 'text.primary' }}>
             {data.map((item, idx) => (
               <Box key={idx} sx={{ mb: 1, fontFamily: 'monospace', fontSize: '0.875rem', color: 'text.primary' }}>
                 [{idx}]: {String(item)}
@@ -1109,7 +1116,7 @@ function TroubleshootPage() {
       }
       return (
         <Box>
-          <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
             <Chip label={`${data.items.length} items`} size="small" />
             {data.count && (
               <Chip label={`Total: ${data.count}`} size="small" variant="outlined" />
@@ -1171,10 +1178,10 @@ function TroubleshootPage() {
       if (keys.length <= 10 && !keys.some(k => typeof data[k] === 'object' && data[k] !== null && !Array.isArray(data[k]))) {
         return (
           <Box>
-            <Chip label="Object Data" size="small" sx={{ mb: 2 }} />
-            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper', color: 'text.primary' }}>
+            <Chip label="Object Data" size="small" sx={{ mb: 1 }} />
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'background.paper', color: 'text.primary' }}>
               {keys.map((key) => (
-                <Box key={key} sx={{ mb: 1.5, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Box key={key} sx={{ mb: 1, pb: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
                   <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', display: 'block', mb: 0.5 }}>
                     {key}
                   </Typography>
@@ -1200,11 +1207,11 @@ function TroubleshootPage() {
       // Complex object - show as formatted JSON
       return (
         <Box>
-          <Chip label="JSON Data" size="small" sx={{ mb: 2 }} />
+          <Chip label="JSON Data" size="small" sx={{ mb: 1 }} />
           <Paper 
             variant="outlined" 
             sx={{ 
-              p: 2, 
+              p: 1.5, 
               bgcolor: 'background.paper',
               fontFamily: 'monospace',
               fontSize: '0.875rem',
@@ -1225,7 +1232,7 @@ function TroubleshootPage() {
     // Fallback
     return (
       <Box>
-        <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper', fontFamily: 'monospace', color: 'text.primary' }}>
+        <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'background.paper', fontFamily: 'monospace', color: 'text.primary' }}>
           {String(data)}
         </Paper>
       </Box>
@@ -1234,8 +1241,8 @@ function TroubleshootPage() {
 
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
           Network Troubleshooting
         </Typography>
         <Typography variant="body1" color="text.secondary">
@@ -1243,15 +1250,15 @@ function TroubleshootPage() {
         </Typography>
       </Box>
 
-      <Grid container spacing={3}>
+      <Grid container spacing={2}>
         {/* Left Column - Troubleshooting Tools */}
         <Grid item xs={12} md={8}>
-          <Grid container spacing={3}>
+          <Grid container spacing={2}>
             {/* Ping Test Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <NetworkCheckIcon color="primary" />
                       <Typography variant="h6">Ping Test</Typography>
@@ -1260,7 +1267,7 @@ function TroubleshootPage() {
                       {expandedCard === 'ping' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Test network connectivity by running ping from a device
                   </Typography>
                   <Collapse in={expandedCard === 'ping'}>
@@ -1272,14 +1279,14 @@ function TroubleshootPage() {
                         label="Device"
                         helperText="Select a device"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="Target IP or Hostname"
                         value={pingTarget}
                         onChange={(e) => setPingTarget(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., 8.8.8.8 or google.com"
                       />
                       <Button
@@ -1300,8 +1307,8 @@ function TroubleshootPage() {
             {/* Client Session Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <PhonelinkRingIcon color="primary" />
                       <Typography variant="h6">Client Session</Typography>
@@ -1310,7 +1317,7 @@ function TroubleshootPage() {
                       {expandedCard === 'client' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     View detailed session information for a connected client
                   </Typography>
                   <Collapse in={expandedCard === 'client'}>
@@ -1320,7 +1327,7 @@ function TroubleshootPage() {
                         label="Client MAC Address"
                         value={clientMac}
                         onChange={(e) => setClientMac(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., aa:bb:cc:dd:ee:ff"
                       />
                       <Button
@@ -1341,8 +1348,8 @@ function TroubleshootPage() {
             {/* AP Diagnostics Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <BugReportIcon color="primary" />
                       <Typography variant="h6">AP Diagnostics</Typography>
@@ -1351,7 +1358,7 @@ function TroubleshootPage() {
                       {expandedCard === 'ap' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Get detailed diagnostic information for an Access Point
                   </Typography>
                   <Collapse in={expandedCard === 'ap'}>
@@ -1364,7 +1371,7 @@ function TroubleshootPage() {
                         deviceType="AP"
                         helperText="Select an access point"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <Button
                         variant="contained"
@@ -1384,8 +1391,8 @@ function TroubleshootPage() {
             {/* Tech Support Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <BugReportIcon color="primary" />
                       <Typography variant="h6">Tech Support</Typography>
@@ -1394,7 +1401,7 @@ function TroubleshootPage() {
                       {expandedCard === 'techSupport' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Get technical support information from a device
                   </Typography>
                   <Collapse in={expandedCard === 'techSupport'}>
@@ -1406,7 +1413,7 @@ function TroubleshootPage() {
                         label="Device"
                         helperText="Select a device"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <Button
                         variant="contained"
@@ -1426,8 +1433,8 @@ function TroubleshootPage() {
             {/* Export Configuration Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <DownloadIcon color="primary" />
                       <Typography variant="h6">Export Configuration</Typography>
@@ -1436,7 +1443,7 @@ function TroubleshootPage() {
                       {expandedCard === 'export' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Export device configuration to a file
                   </Typography>
                   <Collapse in={expandedCard === 'export'}>
@@ -1448,7 +1455,7 @@ function TroubleshootPage() {
                         label="Device"
                         helperText="Select a device"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <Button
                         variant="contained"
@@ -1467,7 +1474,7 @@ function TroubleshootPage() {
 
             {/* CX Switch Troubleshooting Section */}
             <Grid item xs={12}>
-              <Divider sx={{ my: 2 }}>
+              <Divider sx={{ my: 1 }}>
                 <Chip label="CX Switch Troubleshooting" color="primary" />
               </Divider>
             </Grid>
@@ -1475,8 +1482,8 @@ function TroubleshootPage() {
             {/* CX Traceroute Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <RouteIcon color="primary" />
                       <Typography variant="h6">CX Traceroute</Typography>
@@ -1485,7 +1492,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxTraceroute' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Trace the network path to a destination from a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxTraceroute'}>
@@ -1498,14 +1505,14 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="Target IP or Hostname"
                         value={cxTracerouteTarget}
                         onChange={(e) => setCxTracerouteTarget(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., 8.8.8.8 or google.com"
                       />
                       <Button
@@ -1526,8 +1533,8 @@ function TroubleshootPage() {
             {/* CX PoE Bounce Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <PowerIcon color="primary" />
                       <Typography variant="h6">CX PoE Bounce</Typography>
@@ -1536,7 +1543,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxPoeBounce' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Bounce PoE power on a port of a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxPoeBounce'}>
@@ -1549,14 +1556,14 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="Port"
                         value={cxPoePort}
                         onChange={(e) => setCxPoePort(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., 1/1"
                       />
                       <Button
@@ -1577,8 +1584,8 @@ function TroubleshootPage() {
             {/* CX Port Bounce Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <RouterIcon color="primary" />
                       <Typography variant="h6">CX Port Bounce</Typography>
@@ -1587,7 +1594,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxPortBounce' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Bounce a port on a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxPortBounce'}>
@@ -1600,14 +1607,14 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="Port"
                         value={cxPortBouncePort}
                         onChange={(e) => setCxPortBouncePort(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., 1/1"
                       />
                       <Button
@@ -1628,8 +1635,8 @@ function TroubleshootPage() {
             {/* CX Cable Test Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <CableIcon color="primary" />
                       <Typography variant="h6">CX Cable Test</Typography>
@@ -1638,7 +1645,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxCableTest' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Test cable connectivity on a port of a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxCableTest'}>
@@ -1651,14 +1658,14 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="Port"
                         value={cxCableTestPort}
                         onChange={(e) => setCxCableTestPort(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., 1/1"
                       />
                       <Button
@@ -1679,8 +1686,8 @@ function TroubleshootPage() {
             {/* CX HTTP Test Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <HttpIcon color="primary" />
                       <Typography variant="h6">CX HTTP Test</Typography>
@@ -1689,7 +1696,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxHttpTest' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Test HTTP connectivity from a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxHttpTest'}>
@@ -1702,14 +1709,14 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="URL"
                         value={cxHttpUrl}
                         onChange={(e) => setCxHttpUrl(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., http://example.com"
                       />
                       <Button
@@ -1730,8 +1737,8 @@ function TroubleshootPage() {
             {/* CX AAA Test Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <SecurityIcon color="primary" />
                       <Typography variant="h6">CX AAA Test</Typography>
@@ -1740,7 +1747,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxAaaTest' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Test AAA authentication from a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxAaaTest'}>
@@ -1753,14 +1760,14 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
                       <TextField
                         fullWidth
                         label="Username"
                         value={cxAaaUsername}
                         onChange={(e) => setCxAaaUsername(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="Enter username"
                       />
                       <TextField
@@ -1769,7 +1776,7 @@ function TroubleshootPage() {
                         label="Password"
                         value={cxAaaPassword}
                         onChange={(e) => setCxAaaPassword(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="Enter password"
                       />
                       <Button
@@ -1790,8 +1797,8 @@ function TroubleshootPage() {
             {/* CX Show Commands Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <CodeIcon color="primary" />
                       <Typography variant="h6">CX Show Commands</Typography>
@@ -1800,11 +1807,50 @@ function TroubleshootPage() {
                       {expandedCard === 'cxShowCommands' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     List or run show commands on a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxShowCommands'}>
                     <Box>
+                      <List sx={{ pt: 0, pb: 1 }}>
+                        <ListItem
+                          button
+                          sx={{ borderRadius: 1, mb: 0.5 }}
+                        >
+                          <ListItemIcon>
+                            <UpdateIcon color="primary" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Update Firmware"
+                            secondary="Upgrade device firmware"
+                          />
+                        </ListItem>
+                        <ListItem
+                          button
+                          sx={{ borderRadius: 1, mb: 0.5 }}
+                        >
+                          <ListItemIcon>
+                            <HealthAndSafetyIcon color="primary" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Check Device Health"
+                            secondary="View configuration issues"
+                          />
+                        </ListItem>
+                        <ListItem
+                          button
+                          sx={{ borderRadius: 1 }}
+                        >
+                          <ListItemIcon>
+                            <BuildIcon color="primary" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Troubleshooting"
+                            secondary="Ping, traceroute, and more"
+                          />
+                        </ListItem>
+                      </List>
+                      <Divider sx={{ my: 1 }} />
                       <DeviceSelector
                         value={cxSerial}
                         onChange={setCxSerial}
@@ -1813,9 +1859,9 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
-                      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
                         <Button
                           variant="outlined"
                           fullWidth
@@ -1831,7 +1877,7 @@ function TroubleshootPage() {
                         label="Show Command"
                         value={cxShowCommand}
                         onChange={(e) => setCxShowCommand(e.target.value)}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                         placeholder="e.g., show version"
                       />
                       <Button
@@ -1852,8 +1898,8 @@ function TroubleshootPage() {
             {/* CX Locate Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <LocationIcon color="primary" />
                       <Typography variant="h6">CX Locate</Typography>
@@ -1862,7 +1908,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxLocate' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Flash LEDs to locate a CX switch
                   </Typography>
                   <Collapse in={expandedCard === 'cxLocate'}>
@@ -1875,9 +1921,9 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
-                      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
                         <Button
                           variant={cxLocateEnable ? 'contained' : 'outlined'}
                           fullWidth
@@ -1912,8 +1958,8 @@ function TroubleshootPage() {
             {/* CX Reboot Card */}
             <Grid item xs={12} md={6}>
               <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <RestartIcon color="error" />
                       <Typography variant="h6">CX Reboot</Typography>
@@ -1922,7 +1968,7 @@ function TroubleshootPage() {
                       {expandedCard === 'cxReboot' ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                     Reboot a CX switch (use with caution)
                   </Typography>
                   <Collapse in={expandedCard === 'cxReboot'}>
@@ -1935,9 +1981,9 @@ function TroubleshootPage() {
                         deviceType="Switch"
                         helperText="Select a CX switch"
                         disabled={devicesLoading}
-                        sx={{ mb: 2 }}
+                        sx={{ mb: 1 }}
                       />
-                      <Alert severity="warning" sx={{ mb: 2 }}>
+                      <Alert severity="warning" sx={{ mb: 1 }}>
                         Warning: This will reboot the switch and cause a network interruption.
                       </Alert>
                       <Button
@@ -1960,9 +2006,9 @@ function TroubleshootPage() {
 
         {/* Right Column - Results */}
         <Grid item xs={12} md={4}>
-          <Card sx={{ position: 'sticky', top: 20 }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Card sx={{ position: 'sticky', top: 10 }}>
+            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Box>
                   <Typography variant="h6">Results</Typography>
                   {result && result.type && (
@@ -1979,16 +2025,16 @@ function TroubleshootPage() {
                   </Tooltip>
                 )}
               </Box>
-              <Divider sx={{ mb: 2 }} />
+              <Divider sx={{ mb: 1 }} />
 
               {error && (
-                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+                <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>
                   {error}
                 </Alert>
               )}
 
               {success && (
-                <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
+                <Alert severity="success" sx={{ mb: 1 }} onClose={() => setSuccess('')}>
                   {success}
                 </Alert>
               )}
@@ -1998,8 +2044,8 @@ function TroubleshootPage() {
                   {renderResult()}
                 </Box>
               ) : (
-                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
-                  <BugReportIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2 }}>
+                  <BugReportIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
                   <Typography variant="body2" color="text.secondary" align="center">
                     Select a tool and run a diagnostic test to see results here
                   </Typography>

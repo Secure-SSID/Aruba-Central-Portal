@@ -3,7 +3,7 @@
  * Displays detailed information about a specific device and provides management options
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -448,324 +448,50 @@ function WiredInterfacesView({ deviceSerial, siteId, partNumber }) {
     <Box
       sx={{
         width: '100%',
-        overflow: 'auto',
         display: 'flex',
         justifyContent: 'center',
-        p: 2,
+        overflowX: 'auto',
+        overflowY: 'hidden',
       }}
     >
-      {/* Faceplate Container with Outline - Scales together */}
+      {/* Horizontal Panel Container */}
       <Box
+        className="horizontal-panel"
         sx={{
           bgcolor: '#ffffff',
-          borderRadius: 'clamp(8px, 1.25vw + 4px, 20px)',
-          padding: 'clamp(6px, 0.75vw + 3px, 12px)',
-          position: 'relative',
-          border: 'clamp(3px, 0.5vw + 2px, 6px) solid #000000',
-          boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+          borderRadius: '12px',
+          padding: 'clamp(8px, 1vw + 4px, 16px)',
+          border: '2px solid orange',
           width: 'fit-content',
-          maxWidth: '100%',
           minWidth: 0,
-          minHeight: 'clamp(120px, 15vw + 60px, 20px)',
+          maxWidth: 'calc(100% - 32px)',
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
-          transformOrigin: 'center',
-          transition: 'transform 0.2s ease',
-          overflow: 'hidden',
-          // CSS custom property for base size scaling
-          '--base-size': 'clamp(1.2rem, 1.5vw + 0.5rem, 2rem)',
+          gap: '1px',
+          overflow: 'visible',
+          boxSizing: 'border-box',
         }}
       >
-        {/* Conditional Port Layout */}
-        {portLayout.type === '48port' ? (
-          // 52-port layout: All ports (1-52) in 2 rows - odds on top, evens on bottom
-          <Box sx={{ 
-            display: 'flex', 
-            flexDirection: 'column', 
-            gap: 'clamp(2px, 0.3vw + 1px, 6px)',
-            '--base-size': 'clamp(1.2rem, 1.5vw + 0.5rem, 2rem)',
-            width: '100%',
-            maxWidth: '100%',
-            minWidth: 0,
-          }}>
-            {/* Combine all ports (1-52) */}
             {(() => {
-              // Ensure we always have ports 1-52, combining main ports and fiber ports
-              const allPortsSet = new Set([...portLayout.mainPorts, ...portLayout.fiberPorts]);
-              // Fill in any missing ports up to 52
-              for (let i = 1; i <= 52; i++) {
-                allPortsSet.add(i);
-              }
-              const allPorts = Array.from(allPortsSet).sort((a, b) => a - b);
-              const oddPorts = allPorts.filter(p => p % 2 === 1); // 1, 3, 5, ..., 51
-              const evenPorts = allPorts.filter(p => p % 2 === 0); // 2, 4, 6, ..., 52
-              
-              // Split ports for spacing: copper ports (1-48) and fiber ports (49-52)
-              const oddCopper = oddPorts.filter(p => p <= 48);
-              const oddFiber = oddPorts.filter(p => p > 48);
-              const evenCopper = evenPorts.filter(p => p <= 48);
-              const evenFiber = evenPorts.filter(p => p > 48);
-              
-              const renderPort = (portNum, showNumberAbove = false) => {
-                const port = getPortInfo(portNum);
-                const connected = isPortConnected(portNum);
-                const portLabel = (port?.id || portNum.toString()).split('/').pop();
-                const portSize = 'clamp(20px, 2vw + 8px, 28px)';
-                const fontSize = 'clamp(6px, 0.6vw + 2px, 8px)';
-                const iconSize = 'clamp(8px, 0.8vw + 2px, 10px)';
-                const borderWidth = 'clamp(1px, 0.15vw + 0.5px, 1.5px)';
-                
-                return (
-                  <Box key={portNum} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, minWidth: 0 }}>
-                    {/* Number above for odd ports */}
-                    {showNumberAbove && (
-                      <Typography variant="caption" sx={{ 
-                        fontSize: fontSize,
-                        fontWeight: 700, 
-                        color: '#000000', 
-                        mb: 'clamp(1px, 0.2vw + 0.5px, 3px)', 
-                        lineHeight: 1, 
-                        height: 'clamp(10px, 1vw + 2px, 12px)'
-                      }}>
-                        {portNum}
-                      </Typography>
-                    )}
-                    <Tooltip
-                      title={
-                        port ? (
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              Port: {port.id || portNum}
-                            </Typography>
-                            <Typography variant="caption" display="block">
-                              Status: {connected ? 'Connected' : 'Disconnected'}
-                            </Typography>
-                            {port.speed && (
-                              <Typography variant="caption" display="block">
-                                Speed: {port.speed >= 1000000000 ? `${port.speed / 1000000000}G` : `${port.speed / 1000000}M`}
-                              </Typography>
-                            )}
-                            <Typography variant="caption" display="block">
-                              Mode: {port.vlanMode || 'Access'}
-                            </Typography>
-                          </Box>
-                        ) : (
-                          `Port ${portNum}`
-                        )
-                      }
-                      arrow
-                      disableInteractive
-                    >
-                      <Box
-                        onMouseEnter={() => setHoveredPort(portNum)}
-                        onMouseLeave={() => setHoveredPort(null)}
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (!deviceMap || Object.keys(deviceMap).length === 0) return;
-                          let neighborSerial = lldpNeighbors[portNum];
-                          if (!neighborSerial && port?.neighbour) {
-                            neighborSerial = await getNeighborSerial(port.neighbour);
-                          }
-                          if (neighborSerial) {
-                            navigate(`/devices/${neighborSerial}`);
-                          }
-                        }}
-                        sx={{
-                          width: portSize,
-                          height: portSize,
-                          minWidth: 0,
-                          minHeight: portSize,
-                          flexShrink: 1,
-                          flexBasis: portSize,
-                          border: connected ? `${borderWidth} dashed #17eba0` : `${borderWidth} solid rgba(0, 0, 0, 0.3)`,
-                          borderRadius: 'clamp(2px, 0.3vw + 1px, 4px)',
-                          bgcolor: connected ? 'rgba(23, 235, 160, 0.2)' : '#f7f7f7',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: (lldpNeighbors[portNum] || port?.neighbour) ? 'pointer' : 'default',
-                          transition: 'all 0.2s ease',
-                          transform: hoveredPort === portNum ? 'scale(1.1)' : 'scale(1)',
-                          boxShadow: connected
-                            ? `0 0 0 ${borderWidth} rgba(23, 235, 160, 0.3), 0 0 10px rgba(23, 235, 160, 0.4)`
-                            : 'inset 0 1px 1px rgba(0, 0, 0, 0.05)',
-                        }}
-                      >
-                        {connected && <LanIcon sx={{ fontSize: iconSize, color: '#17eba0' }} />}
-                      </Box>
-                    </Tooltip>
-                    {/* Number below for even ports */}
-                    {!showNumberAbove && (
-                      <Typography variant="caption" sx={{ 
-                        fontSize: fontSize,
-                        fontWeight: 700, 
-                        color: '#000000', 
-                        mt: 'clamp(1px, 0.2vw + 0.5px, 3px)', 
-                        lineHeight: 1, 
-                        height: 'clamp(10px, 1vw + 2px, 12px)'
-                      }}>
-                        {portNum}
-                      </Typography>
-                    )}
-                  </Box>
-                );
-              };
+              // Layout:
+              // Left side: Ports 15, 16 (centered vertically with numbers above and below)
+              // Right side: Two rows
+              //   - Top row: 1, 3, 5, 7, 9, 11, 13 (odd ports - numbers only on top)
+              //   - Bottom row: 2, 4, 6, 8, 10, 12, 14 (even ports - numbers only on bottom)
+              const fiberPorts = portLayout.fiberPorts; // 15, 16
+              const topRowPorts = portLayout.mainPorts.filter((_, i) => i % 2 === 0); // Odd ports: 1, 3, 5, 7, 9, 11, 13
+              const bottomRowPorts = portLayout.mainPorts.filter((_, i) => i % 2 === 1); // Even ports: 2, 4, 6, 8, 10, 12, 14
 
-              return (
-                <>
-                  {/* Top Row - Odd Ports */}
-                  <Box sx={{ 
-                    display: 'flex', 
-                    gap: 'clamp(3px, 0.4vw + 1px, 6px)', 
-                    flexWrap: 'nowrap', 
-                    justifyContent: 'flex-start', 
-                    alignItems: 'flex-start',
-                    width: '100%',
-                    maxWidth: '100%',
-                    minWidth: 0,
-                    overflow: 'hidden',
-                  }}>
-                    {oddCopper.map((portNum) => renderPort(portNum, true))}
-                    {oddFiber.length > 0 && (
-                      <>
-                        <Box sx={{ width: 'clamp(8px, 1vw + 4px, 12px)', flexShrink: 0 }} /> {/* Spacer between copper and fiber */}
-                        {oddFiber.map((portNum) => renderPort(portNum, true))}
-                      </>
-                    )}
-                  </Box>
-                  
-                  {/* Bottom Row - Even Ports */}
-                  <Box sx={{ 
-                    display: 'flex', 
-                    gap: 'clamp(3px, 0.4vw + 1px, 6px)', 
-                    flexWrap: 'nowrap', 
-                    justifyContent: 'flex-start', 
-                    alignItems: 'flex-start',
-                    width: '100%',
-                    maxWidth: '100%',
-                    minWidth: 0,
-                    overflow: 'hidden',
-                  }}>
-                    {evenCopper.map((portNum) => renderPort(portNum, false))}
-                    {evenFiber.length > 0 && (
-                      <>
-                        <Box sx={{ width: 'clamp(8px, 1vw + 4px, 12px)', flexShrink: 0 }} /> {/* Spacer between copper and fiber */}
-                        {evenFiber.map((portNum) => renderPort(portNum, false))}
-                      </>
-                    )}
-                  </Box>
-                </>
-              );
-            })()}
-          </Box>
-        ) : (
-          // Default 14-port layout
-          <>
-            {/* Ports 15-16 (Left Group - SFP+) - Side by Side */}
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'row',
-                gap: 2,
-                mr: 6,
-              }}
-            >
-              {portLayout.fiberPorts.map((portNum) => {
-                const port = getPortInfo(portNum);
-                const connected = isPortConnected(portNum);
-                const portLabel = (port?.id || portNum.toString()).split('/').pop();
-                return (
-                  <Tooltip
-                    key={portNum}
-                    title={
-                      port ? (
-                        <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            Port: {port.id || portNum}
-                          </Typography>
-                          <Typography variant="caption" display="block">
-                            Status: {connected ? 'Connected' : 'Disconnected'}
-                          </Typography>
-                          {port.speed && (
-                            <Typography variant="caption" display="block">
-                              Speed: {port.speed >= 1000000000 ? `${port.speed / 1000000000}G` : `${port.speed / 1000000}M`}
-                            </Typography>
-                          )}
-                          <Typography variant="caption" display="block">
-                            Mode: {port.vlanMode || 'Access'}
-                          </Typography>
-                        </Box>
-                      ) : (
-                        `Port ${portNum}`
-                      )
-                    }
-                    arrow
-                  >
-                    <Box
-                      onMouseEnter={() => setHoveredPort(portNum)}
-                      onMouseLeave={() => setHoveredPort(null)}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const neighborSerial = lldpNeighbors[portNum] || (port?.neighbour ? getNeighborSerial(port.neighbour) : null);
-                        if (neighborSerial) {
-                          navigate(`/devices/${neighborSerial}`);
-                        } else if (port?.neighbour) {
-                          console.warn('No serial found for neighbor:', port.neighbour);
-                        }
-                      }}
-                      sx={{
-                        width: 60,
-                        height: 60,
-                        border: connected
-                          ? '2px dashed #17eba0'
-                          : '2px solid rgba(0, 0, 0, 0.3)',
-                        borderRadius: 1,
-                        bgcolor: connected ? 'rgba(23, 235, 160, 0.2)' : '#f7f7f7',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: (lldpNeighbors[portNum] || (port?.neighbour && getNeighborSerial(port.neighbour))) ? 'pointer' : 'default',
-                        transition: 'all 0.2s ease',
-                        transform: hoveredPort === portNum ? 'scale(1.1)' : 'scale(1)',
-                        boxShadow: connected
-                          ? '0 0 0 3px rgba(23, 235, 160, 0.3), 0 0 20px rgba(23, 235, 160, 0.6), 0 0 30px rgba(23, 235, 160, 0.4)'
-                          : 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
-                      }}
-                    >
-                      <Typography variant="caption" sx={{ fontSize: '10px', mb: 0.5, fontWeight: 600, color: '#000000' }}>
-                        {portLabel}
-                      </Typography>
-                      {connected && (
-                        <LanIcon sx={{ fontSize: 20, color: '#17eba0' }} />
-                      )}
-                    </Box>
-                  </Tooltip>
-                );
-              })}
-            </Box>
+              // Consistent sizing for all switches
+              const portSize = 'clamp(12px, 1.2vw + 6px, 28px)';
+              const fontSize = 'clamp(5px, 0.5vw + 2px, 12px)';
+              const iconSize = 'clamp(6px, 0.6vw + 3px, 14px)';
+              const borderWidth = 'clamp(0.5px, 0.1vw + 0.4px, 1.5px)';
 
-            {/* Ports 1-14 (Right Group - Main Ports) */}
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2.5,
-              }}
-            >
-              {/* Top Row - Odd Ports */}
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'nowrap' }}>
-                {portLayout.mainPorts.filter((_, i) => i % 2 === 0).map((portNum) => {
-              const port = getPortInfo(portNum);
-              const connected = isPortConnected(portNum);
-              const portLabel = (port?.id || portNum.toString()).split('/').pop();
-              return (
+              // Common port rendering logic
+              const renderPortBox = (portNum, port, connected) => (
                 <Tooltip
-                  key={portNum}
                   title={
                     port ? (
                       <Box>
@@ -783,44 +509,6 @@ function WiredInterfacesView({ deviceSerial, siteId, partNumber }) {
                         <Typography variant="caption" display="block">
                           Mode: {port.vlanMode || 'Access'}
                         </Typography>
-                        {port.neighbour && (() => {
-                          // Check LLDP neighbors first (already has serial), then try lookup
-                          const neighborSerial = lldpNeighbors[portNum];
-                          return (
-                            <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                              Neighbor:{' '}
-                              {neighborSerial ? (
-                                <Typography
-                                  component="span"
-                                  variant="caption"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    // Make sure we have the serial
-                                    let serial = neighborSerial;
-                                    if (!serial && deviceMap && Object.keys(deviceMap).length > 0) {
-                                      serial = await getNeighborSerial(port.neighbour);
-                                    }
-                                    if (serial) {
-                                      navigate(`/devices/${serial}`);
-                                    }
-                                  }}
-                                  sx={{
-                                    color: 'primary.main',
-                                    textDecoration: 'underline',
-                                    cursor: 'pointer',
-                                    '&:hover': {
-                                      color: 'primary.dark',
-                                    },
-                                  }}
-                                >
-                                  {port.neighbour}
-                                </Typography>
-                              ) : (
-                                port.neighbour
-                              )}
-                            </Typography>
-                          );
-                        })()}
                       </Box>
                     ) : (
                       `Port ${portNum}`
@@ -828,7 +516,6 @@ function WiredInterfacesView({ deviceSerial, siteId, partNumber }) {
                   }
                   arrow
                   disableInteractive
-                  enterDelay={300}
                 >
                   <Box
                     onMouseEnter={() => setHoveredPort(portNum)}
@@ -836,191 +523,213 @@ function WiredInterfacesView({ deviceSerial, siteId, partNumber }) {
                     onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      // Only proceed if deviceMap is populated
-                      if (!deviceMap || Object.keys(deviceMap).length === 0) {
-                        console.warn('Device map not ready yet, cannot navigate to neighbor');
-                        return;
-                      }
-                      
-                      // Try LLDP neighbor first (already has serial), then fall back to port.neighbour lookup
+                      if (!deviceMap || Object.keys(deviceMap).length === 0) return;
                       let neighborSerial = lldpNeighbors[portNum];
                       if (!neighborSerial && port?.neighbour) {
                         neighborSerial = await getNeighborSerial(port.neighbour);
                       }
-                      
                       if (neighborSerial) {
-                        console.log(`Navigating to neighbor device: ${port?.neighbour} -> ${neighborSerial}`);
                         navigate(`/devices/${neighborSerial}`);
-                      } else if (port?.neighbour) {
-                        console.warn('No serial found for neighbor:', port.neighbour, '- cannot navigate');
                       }
                     }}
                     sx={{
-                      width: 50,
-                      height: 50,
+                      width: portSize,
+                      height: portSize,
+                      minWidth: '10px',
+                      minHeight: '10px',
                       border: connected
-                        ? '2px dashed #17eba0'
-                        : '2px solid rgba(0, 0, 0, 0.3)',
-                      borderRadius: 1,
+                        ? `${borderWidth} dashed #17eba0`
+                        : `${borderWidth} solid rgba(0, 0, 0, 0.3)`,
+                      borderRadius: 'clamp(1px, 2px + 0.8vw, 5px)',
                       bgcolor: connected ? 'rgba(23, 235, 160, 0.2)' : '#f7f7f7',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      cursor: (lldpNeighbors[portNum] || (port?.neighbour && getNeighborSerial(port.neighbour))) ? 'pointer' : 'default',
+                      cursor: (lldpNeighbors[portNum] || port?.neighbour) ? 'pointer' : 'default',
                       transition: 'all 0.2s ease',
-                      transform: hoveredPort === portNum ? 'scale(1.15)' : 'scale(1)',
+                      transform: hoveredPort === portNum ? 'scale(1.1)' : 'scale(1)',
                       boxShadow: connected
-                        ? '0 0 0 3px rgba(23, 235, 160, 0.3), 0 0 20px rgba(23, 235, 160, 0.6), 0 0 30px rgba(23, 235, 160, 0.4)'
-                        : 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
-                      position: 'relative',
+                        ? `0 0 0 ${borderWidth} rgba(23, 235, 160, 0.3), 0 0 10px rgba(23, 235, 160, 0.4)`
+                        : 'inset 0 1px 1px rgba(0, 0, 0, 0.05)',
                     }}
                   >
-                    <Typography variant="caption" sx={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>
-                      {portLabel}
-                    </Typography>
-                    {connected && (
-                      <LanIcon sx={{ fontSize: 16, color: '#17eba0', mt: 0.25 }} />
-                    )}
+                    {connected && <LanIcon sx={{ fontSize: iconSize, color: '#17eba0' }} />}
                   </Box>
                 </Tooltip>
               );
-            })}
-              </Box>
 
-              {/* Bottom Row - Even Ports */}
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'nowrap' }}>
-                {portLayout.mainPorts.filter((_, i) => i % 2 === 1).map((portNum) => {
-                  const port = getPortInfo(portNum);
-                  const connected = isPortConnected(portNum);
-                  const portLabel = (port?.id || portNum.toString()).split('/').pop();
-                  return (
-                    <Tooltip
-                      key={portNum}
-                      title={
-                        port ? (
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              Port: {port.id || portNum}
-                            </Typography>
-                            <Typography variant="caption" display="block">
-                              Status: {connected ? 'Connected' : 'Disconnected'}
-                            </Typography>
-                            {port.speed && (
-                              <Typography variant="caption" display="block">
-                                Speed: {port.speed >= 1000000000 ? `${port.speed / 1000000000}G` : `${port.speed / 1000000}M`}
-                              </Typography>
-                            )}
-                            <Typography variant="caption" display="block">
-                              Mode: {port.vlanMode || 'Access'}
-                            </Typography>
-                            {port.neighbour && (() => {
-                              // Check LLDP neighbors first (already has serial), then try lookup
-                              const neighborSerial = lldpNeighbors[portNum];
-                              return (
-                                <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                                  Neighbor:{' '}
-                                  {neighborSerial ? (
-                                    <Typography
-                                      component="span"
-                                      variant="caption"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        // Make sure we have the serial
-                                        let serial = neighborSerial;
-                                        if (!serial && deviceMap && Object.keys(deviceMap).length > 0) {
-                                          serial = await getNeighborSerial(port.neighbour);
-                                        }
-                                        if (serial) {
-                                          navigate(`/devices/${serial}`);
-                                        }
-                                      }}
-                                      sx={{
-                                        color: 'primary.main',
-                                        textDecoration: 'underline',
-                                        cursor: 'pointer',
-                                        '&:hover': {
-                                          color: 'primary.dark',
-                                        },
-                                      }}
-                                    >
-                                      {port.neighbour}
-                                    </Typography>
-                                  ) : (
-                                    port.neighbour
-                                  )}
-                                </Typography>
-                              );
-                            })()}
-                          </Box>
-                        ) : (
-                          `Port ${portNum}`
-                        )
-                      }
-                      arrow
-                      disableInteractive
-                      enterDelay={300}
+              // Render port with numbers above and below (for ports 15-16)
+              const renderPortWithBothNumbers = (portNum) => {
+                const port = getPortInfo(portNum);
+                const connected = isPortConnected(portNum);
+                
+                return (
+                  <Box
+                    key={portNum}
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      flexShrink: 0,
+                      minWidth: 0,
+                      gap: 'clamp(2px, 0.2vw + 1px, 4px)',
+                    }}
+                  >
+                    {/* Number above */}
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        fontSize: fontSize,
+                        fontWeight: 700,
+                        color: '#000000',
+                        lineHeight: 1,
+                        height: fontSize,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
                     >
-                      <Box
-                        onMouseEnter={() => setHoveredPort(portNum)}
-                        onMouseLeave={() => setHoveredPort(null)}
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          // Only proceed if deviceMap is populated
-                          if (!deviceMap || Object.keys(deviceMap).length === 0) {
-                            console.warn('Device map not ready yet, cannot navigate to neighbor');
-                            return;
-                          }
-                          
-                          // Try LLDP neighbor first (already has serial), then fall back to port.neighbour lookup
-                          let neighborSerial = lldpNeighbors[portNum];
-                          if (!neighborSerial && port?.neighbour) {
-                            neighborSerial = await getNeighborSerial(port.neighbour);
-                          }
-                          
-                          if (neighborSerial) {
-                            console.log(`Navigating to neighbor device: ${port?.neighbour} -> ${neighborSerial}`);
-                            navigate(`/devices/${neighborSerial}`);
-                          } else if (port?.neighbour) {
-                            console.warn('No serial found for neighbor:', port.neighbour, '- cannot navigate');
-                          }
-                        }}
-                        sx={{
-                          width: 50,
-                          height: 50,
-                          border: connected
-                            ? '2px dashed #17eba0'
-                            : '2px solid rgba(0, 0, 0, 0.3)',
-                          borderRadius: 1,
-                          bgcolor: connected ? 'rgba(23, 235, 160, 0.2)' : '#f7f7f7',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: (lldpNeighbors[portNum] || (port?.neighbour && getNeighborSerial(port.neighbour))) ? 'pointer' : 'default',
-                          transition: 'all 0.2s ease',
-                          transform: hoveredPort === portNum ? 'scale(1.15)' : 'scale(1)',
-                          boxShadow: connected
-                            ? '0 0 0 3px rgba(23, 235, 160, 0.3), 0 0 20px rgba(23, 235, 160, 0.6), 0 0 30px rgba(23, 235, 160, 0.4)'
-                            : 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
-                        }}
-                      >
-                        <Typography variant="caption" sx={{ fontSize: '9px', fontWeight: 600, color: '#000000' }}>
-                          {portLabel}
-                        </Typography>
-                        {connected && (
-                          <LanIcon sx={{ fontSize: 16, color: '#17eba0', mt: 0.25 }} />
-                        )}
-                      </Box>
-                    </Tooltip>
-                  );
-                })}
-              </Box>
-            </Box>
-          </>
-        )}
-      </Box>
+                      {portNum}
+                    </Typography>
+                    {renderPortBox(portNum, port, connected)}
+                  </Box>
+                );
+              };
+
+              // Render port with number only on top (for top row - odd ports)
+              const renderPortWithTopNumber = (portNum) => {
+                const port = getPortInfo(portNum);
+                const connected = isPortConnected(portNum);
+                
+                return (
+                  <Box
+                    key={portNum}
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      flexShrink: 0,
+                      minWidth: 0,
+                      gap: 'clamp(2px, 0.2vw + 1px, 4px)',
+                    }}
+                  >
+                    {/* Number above */}
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        fontSize: fontSize,
+                        fontWeight: 700,
+                        color: '#000000',
+                        lineHeight: 1,
+                        height: fontSize,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {portNum}
+                    </Typography>
+                    {renderPortBox(portNum, port, connected)}
+                  </Box>
+                );
+              };
+
+              // Render port with number only on bottom (for bottom row - even ports)
+              const renderPortWithBottomNumber = (portNum) => {
+                const port = getPortInfo(portNum);
+                const connected = isPortConnected(portNum);
+                
+                return (
+                  <Box
+                    key={portNum}
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      flexShrink: 0,
+                      minWidth: 0,
+                      gap: 'clamp(2px, 0.2vw + 1px, 4px)',
+                    }}
+                  >
+                    {renderPortBox(portNum, port, connected)}
+                    {/* Number below */}
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        fontSize: fontSize,
+                        fontWeight: 700,
+                        color: '#000000',
+                        lineHeight: 1,
+                        height: fontSize,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {portNum}
+                    </Typography>
+                  </Box>
+                );
+              };
+
+              return (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 'clamp(16px, 3vw + 12px, 120px)',
+                  }}
+                >
+                  {/* Left side: Ports 15, 16 (centered vertically between the two rows) */}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 'clamp(1px, 2px + 0.8vw, 5px)',
+                    }}
+                  >
+                    {fiberPorts.map((portNum) => renderPortWithBothNumbers(portNum))}
+                  </Box>
+
+                  {/* Right side: Two rows */}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 'clamp(2px, 0.5vw + 2px, 8px)',
+                    }}
+                  >
+                    {/* Top Row: 1, 3, 5, 7, 9, 11, 13 (numbers only on top) */}
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'flex-end',
+                        gap: 'clamp(1px, 2px + 0.8vw, 5px)',
+                        flexWrap: 'nowrap',
+                      }}
+                    >
+                      {topRowPorts.map((portNum) => renderPortWithTopNumber(portNum))}
+                    </Box>
+
+                    {/* Bottom Row: 2, 4, 6, 8, 10, 12, 14 (numbers only on bottom) */}
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'flex-start',
+                        gap: 'clamp(1px, 2px + 0.8vw, 5px)',
+                        flexWrap: 'nowrap',
+                      }}
+                    >
+                      {bottomRowPorts.map((portNum) => renderPortWithBottomNumber(portNum))}
+                    </Box>
+                  </Box>
+                </Box>
+              );
+            })()}
+        </Box>
     </Box>
   );
 }
@@ -1515,7 +1224,7 @@ function DeviceImageDisplay({ partNumber, deviceSerial, deviceType, siteId, onRe
   if (imageError) {
     return (
       <Card sx={{ mt: 3, bgcolor: 'transparent', boxShadow: 'none' }}>
-        <CardContent sx={{ bgcolor: 'transparent', p: 2 }}>
+        <CardContent sx={{ bgcolor: 'transparent', p: 1.5 }}>
           <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
             Device Image
           </Typography>
@@ -1604,6 +1313,7 @@ function DeviceDetailPage() {
   const [healthCheckData, setHealthCheckData] = useState(null);
   const [healthCheckLoading, setHealthCheckLoading] = useState(false);
   const [healthCheckError, setHealthCheckError] = useState('');
+  const [healthCheckDialogOpen, setHealthCheckDialogOpen] = useState(false);
   const [troubleshootDialogOpen, setTroubleshootDialogOpen] = useState(false);
   const [troubleshootAction, setTroubleshootAction] = useState(null);
   const [troubleshootLoading, setTroubleshootLoading] = useState(false);
@@ -1828,9 +1538,11 @@ function DeviceDetailPage() {
   const handleHealthCheck = async () => {
     if (!resolvedSerial) {
       setHealthCheckError('Device serial number is required');
+      setHealthCheckDialogOpen(true);
       return;
     }
 
+    setHealthCheckDialogOpen(true);
     setHealthCheckLoading(true);
     setHealthCheckError('');
     setHealthCheckData(null);
@@ -1911,11 +1623,11 @@ function DeviceDetailPage() {
   return (
     <Box>
           {/* Header */}
-          <Box sx={{ mb: 4 }}>
+          <Box sx={{ mb: 2 }}>
             <Button
               startIcon={<ArrowBackIcon />}
               onClick={() => navigate('/devices')}
-              sx={{ mb: 2 }}
+              sx={{ mb: 1 }}
             >
               Back to Devices
             </Button>
@@ -1961,22 +1673,22 @@ function DeviceDetailPage() {
 
       {/* Error Alert */}
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
           {error}
         </Alert>
       )}
 
-      <Grid container spacing={3}>
+      <Grid container spacing={2}>
         {/* Device Information */}
         <Grid item xs={12} md={8}>
           <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
                 Device Information
               </Typography>
-              <Divider sx={{ mb: 2 }} />
+              <Divider sx={{ mb: 1.5 }} />
 
-              <Grid container spacing={2}>
+              <Grid container spacing={1.5}>
                 {/* Basic Info - Collapsible */}
                 <Grid item xs={12}>
                   <Accordion defaultExpanded>
@@ -1985,10 +1697,10 @@ function DeviceDetailPage() {
                         Basic Information
                       </Typography>
                     </AccordionSummary>
-                    <AccordionDetails>
-                      <Grid container spacing={2}>
+                    <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                      <Grid container spacing={1.5}>
                         <Grid item xs={6}>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                             Serial Number
                           </Typography>
                           <Typography variant="body1" fontFamily="monospace" sx={{ fontWeight: 600 }}>
@@ -2064,10 +1776,10 @@ function DeviceDetailPage() {
                         Configuration Details
                       </Typography>
                     </AccordionSummary>
-                    <AccordionDetails>
-                      <Grid container spacing={2}>
+                    <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                      <Grid container spacing={1.5}>
                         <Grid item xs={6}>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                             Deployment
                           </Typography>
                           <Typography variant="body1">
@@ -2131,10 +1843,10 @@ function DeviceDetailPage() {
                         Location Details
                       </Typography>
                     </AccordionSummary>
-                    <AccordionDetails>
-                      <Grid container spacing={2}>
+                    <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                      <Grid container spacing={1.5}>
                         <Grid item xs={6}>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                             Site Name
                           </Typography>
                           <Typography variant="body1">
@@ -2170,32 +1882,12 @@ function DeviceDetailPage() {
                   </Accordion>
                 </Grid>
 
-                {/* Wired Interfaces - Switch Port Visualization - Collapsible */}
-                {device?.deviceType === 'SWITCH' && (
-                  <Grid item xs={12}>
-                    <Accordion defaultExpanded>
-                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                          Wired Interfaces
-                        </Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <WiredInterfacesView 
-                          deviceSerial={device.serialNumber}
-                          siteId={device.siteId}
-                          partNumber={device.partNumber}
-                        />
-                      </AccordionDetails>
-                    </Accordion>
-                  </Grid>
-                )}
-
                 {/* Cluster Info (if available) */}
                 {device?.clusterName && (
                   <>
                     <Grid item xs={12}>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
+                      <Divider sx={{ my: 1.5 }} />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
                         Cluster Information
                       </Typography>
                     </Grid>
@@ -2214,13 +1906,13 @@ function DeviceDetailPage() {
                 {device?.notes && (
                   <>
                     <Grid item xs={12}>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
+                      <Divider sx={{ my: 1.5 }} />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
                         Notes
                       </Typography>
                     </Grid>
                     <Grid item xs={12}>
-                      <Typography variant="body2" sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                      <Typography variant="body2" sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1 }}>
                         {device?.notes}
                       </Typography>
                     </Grid>
@@ -2229,22 +1921,6 @@ function DeviceDetailPage() {
               </Grid>
             </CardContent>
           </Card>
-
-          {/* Device Image with Port Overlay - Hidden but kept for port overlay functionality */}
-          {device?.partNumber && device?.deviceType === 'SWITCH' && (
-            <Box sx={{ display: 'none' }}>
-              <DeviceImageDisplay 
-                partNumber={device.partNumber}
-                deviceSerial={device.serialNumber}
-                deviceType={device.deviceType}
-                siteId={device.siteId}
-                onRefresh={() => {
-                  // Force image reload by updating timestamp
-                  setDevice({ ...device });
-                }}
-              />
-            </Box>
-          )}
         </Grid>
 
         {/* Device Actions - Collapsible */}
@@ -2255,12 +1931,12 @@ function DeviceDetailPage() {
                 Device Actions
               </Typography>
             </AccordionSummary>
-            <AccordionDetails>
+            <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
               <List sx={{ pt: 0 }}>
                 <ListItem
                   button
                   onClick={() => handleActionClick('firmware', 'Update Firmware')}
-                  sx={{ borderRadius: 1, mb: 1 }}
+                  sx={{ borderRadius: 1, mb: 0.5, py: 0.75 }}
                 >
                   <ListItemIcon>
                     <UpdateIcon color="primary" />
@@ -2275,7 +1951,7 @@ function DeviceDetailPage() {
                   button
                   onClick={handleHealthCheck}
                   disabled={healthCheckLoading}
-                  sx={{ borderRadius: 1, mb: 1 }}
+                  sx={{ borderRadius: 1, mb: 0.5, py: 0.75 }}
                 >
                   <ListItemIcon>
                     {healthCheckLoading ? (
@@ -2293,10 +1969,27 @@ function DeviceDetailPage() {
                 <ListItem
                   button
                   onClick={() => {
+                    setTroubleshootDialogOpen(true);
+                    setTroubleshootAction('port-bounce');
+                  }}
+                  sx={{ borderRadius: 1, mb: 0.5, py: 0.75 }}
+                >
+                  <ListItemIcon>
+                    <RouteIcon color="primary" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="CX Port Bounce"
+                    secondary="Bounce a port on a CX switch"
+                  />
+                </ListItem>
+
+                <ListItem
+                  button
+                  onClick={() => {
                     const serial = resolvedSerial || serialOrName;
                     navigate(`/troubleshoot${serial ? `?device=${encodeURIComponent(serial)}` : ''}`);
                   }}
-                  sx={{ borderRadius: 1 }}
+                  sx={{ borderRadius: 1, py: 0.75 }}
                 >
                   <ListItemIcon>
                     <BuildIcon color="primary" />
@@ -2311,7 +2004,50 @@ function DeviceDetailPage() {
           </Accordion>
         </Grid>
 
+        {/* Device Image with Port Overlay - Hidden but kept for port overlay functionality */}
+        {device?.partNumber && device?.deviceType === 'SWITCH' && (
+          <Box sx={{ display: 'none' }}>
+            <DeviceImageDisplay 
+              partNumber={device.partNumber}
+              deviceSerial={device.serialNumber}
+              deviceType={device.deviceType}
+              siteId={device.siteId}
+              onRefresh={() => {
+                // Force image reload by updating timestamp
+                setDevice({ ...device });
+              }}
+            />
+          </Box>
+        )}
 
+      </Grid>
+
+      {/* Wired Interfaces - Separate full-width section */}
+      {device?.deviceType === 'SWITCH' && (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Accordion defaultExpanded>
+              <AccordionSummary 
+                expandIcon={<ExpandMoreIcon />}
+                sx={{ minHeight: '48px', '&.Mui-expanded': { minHeight: '48px' } }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Wired Interfaces
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                <WiredInterfacesView 
+                  deviceSerial={device.serialNumber}
+                  siteId={device.siteId}
+                  partNumber={device.partNumber}
+                />
+              </AccordionDetails>
+            </Accordion>
+          </Grid>
+        </Grid>
+      )}
+
+      <Grid container spacing={2}>
         {/* Switch-Specific Details (Accordion) */}
         {switchDetails && (
           <Grid item xs={12}>
@@ -2321,10 +2057,10 @@ function DeviceDetailPage() {
                   Switch Details
                 </Typography>
               </AccordionSummary>
-              <AccordionDetails>
-                <Grid container spacing={2}>
+              <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                <Grid container spacing={1.5}>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Deployment
                     </Typography>
                     <Typography variant="body1">
@@ -2332,7 +2068,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Switch Role
                     </Typography>
                     <Typography variant="body1">
@@ -2340,7 +2076,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Switch Type
                     </Typography>
                     <Typography variant="body1">
@@ -2348,7 +2084,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       J-Number
                     </Typography>
                     <Typography variant="body1" fontFamily="monospace">
@@ -2356,7 +2092,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Location
                     </Typography>
                     <Typography variant="body1">
@@ -2364,7 +2100,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Contact
                     </Typography>
                     <Typography variant="body1">
@@ -2372,7 +2108,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Manufacturer
                     </Typography>
                     <Typography variant="body1">
@@ -2380,7 +2116,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Config Status
                     </Typography>
                     <Chip
@@ -2390,7 +2126,7 @@ function DeviceDetailPage() {
                     />
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Last Restart Reason
                     </Typography>
                     <Typography variant="body1">
@@ -2398,7 +2134,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Reboot Timestamp
                     </Typography>
                     <Typography variant="body1">
@@ -2406,7 +2142,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Firmware Backup Version
                     </Typography>
                     <Typography variant="body1">
@@ -2414,7 +2150,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Firmware Recommended Version
                     </Typography>
                     <Typography variant="body1">
@@ -2422,7 +2158,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       STP Enabled
                     </Typography>
                     <Typography variant="body1">
@@ -2430,7 +2166,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       STP Mode
                     </Typography>
                     <Typography variant="body1">
@@ -2438,7 +2174,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Public IP
                     </Typography>
                     <Typography variant="body1" fontFamily="monospace">
@@ -2446,7 +2182,7 @@ function DeviceDetailPage() {
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
                       Last Config Change
                     </Typography>
                     <Typography variant="body1">
@@ -2457,12 +2193,12 @@ function DeviceDetailPage() {
 
                 {/* Health Reasons */}
                 {switchDetails.healthReasons && (
-                  <Box sx={{ mt: 3 }}>
-                    <Divider sx={{ mb: 2 }} />
+                  <Box sx={{ mt: 2 }}>
+                    <Divider sx={{ mb: 1.5 }} />
                     <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
                       Health Status
                     </Typography>
-                    <Grid container spacing={2}>
+                    <Grid container spacing={1.5}>
                       {switchDetails.healthReasons.poorReasons?.length > 0 && (
                         <Grid item xs={12}>
                           <Typography variant="caption" color="error">
@@ -2514,384 +2250,6 @@ function DeviceDetailPage() {
           </Grid>
         )}
 
-        {/* Device Health Check Results */}
-        {(healthCheckData || healthCheckError) && (
-          <Grid item xs={12}>
-            <Card>
-              <CardContent>
-                <Accordion defaultExpanded>
-                  <AccordionSummary 
-                    expandIcon={<ExpandMoreIcon />}
-                    sx={{ 
-                      '& .MuiAccordionSummary-content': {
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                      }
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <HealthAndSafetyIcon color="primary" />
-                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                        Device Health Check
-                      </Typography>
-                      {healthCheckData && (
-                        <>
-                          {healthCheckData.validationBlocker?.length > 0 && (
-                            <Chip 
-                              label={`${healthCheckData.validationBlocker.length} Blocker${healthCheckData.validationBlocker.length > 1 ? 's' : ''}`}
-                              size="small"
-                              color="error"
-                              sx={{ ml: 1 }}
-                            />
-                          )}
-                          {healthCheckData.validationNonBlocker?.length > 0 && (
-                            <Chip 
-                              label={`${healthCheckData.validationNonBlocker.length} Warning${healthCheckData.validationNonBlocker.length > 1 ? 's' : ''}`}
-                              size="small"
-                              color="warning"
-                              sx={{ ml: 1 }}
-                            />
-                          )}
-                          {(!healthCheckData.validationBlocker || healthCheckData.validationBlocker.length === 0) &&
-                           (!healthCheckData.validationNonBlocker || healthCheckData.validationNonBlocker.length === 0) &&
-                           (!healthCheckData.configDistribution || healthCheckData.configDistribution.length === 0) &&
-                           (!healthCheckData.configImport || healthCheckData.configImport.length === 0) && (
-                            <Chip 
-                              label="Healthy"
-                              size="small"
-                              color="success"
-                              sx={{ ml: 1 }}
-                            />
-                          )}
-                        </>
-                      )}
-                    </Box>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleHealthCheck();
-                      }}
-                      disabled={healthCheckLoading}
-                      startIcon={healthCheckLoading ? <CircularProgress size={16} /> : <HealthAndSafetyIcon />}
-                      sx={{ mr: 2 }}
-                    >
-                      Refresh
-                    </Button>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    {healthCheckError && (
-                      <Alert severity="error" sx={{ mb: 2 }}>
-                        {healthCheckError}
-                      </Alert>
-                    )}
-
-                    {healthCheckData && (
-                      <Grid container spacing={2}>
-                        {/* Validation Blockers */}
-                        {healthCheckData.validationBlocker && healthCheckData.validationBlocker.length > 0 && (
-                          <Grid item xs={12}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Chip label="Blockers" size="small" color="error" />
-                              {healthCheckData.validationBlocker.length} issue{healthCheckData.validationBlocker.length > 1 ? 's' : ''} preventing configuration
-                            </Typography>
-                            {healthCheckData.validationBlocker.map((issue, idx) => (
-                              <Accordion key={idx} sx={{ mb: 2 }}>
-                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Chip label="Blocker" size="small" color="error" />
-                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                      {issue.issueCategory}: {issue.issueDescription}
-                                    </Typography>
-                                  </Box>
-                                </AccordionSummary>
-                                <AccordionDetails>
-                                  <Grid container spacing={2}>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Issue Category
-                                      </Typography>
-                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                        {issue.issueCategory}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Profile Name
-                                      </Typography>
-                                      <Typography variant="body2" fontFamily="monospace">
-                                        {issue.profileName}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Profile Type
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.profileType}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Assigned Scope
-                                      </Typography>
-                                      <Typography variant="body2" fontFamily="monospace">
-                                        {issue.assignedScope}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={12}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Issue Description
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.issueDescription}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={12}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Recommended Action
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.recommendedAction}
-                                      </Typography>
-                                    </Grid>
-                                    {issue.timestamp && (
-                                      <Grid item xs={6}>
-                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                          Timestamp
-                                        </Typography>
-                                        <Typography variant="body2">
-                                          {formatTimestamp(parseInt(issue.timestamp))}
-                                        </Typography>
-                                      </Grid>
-                                    )}
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Scope Type
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.assignedScopeType}
-                                      </Typography>
-                                    </Grid>
-                                  </Grid>
-                                </AccordionDetails>
-                              </Accordion>
-                            ))}
-                          </Grid>
-                        )}
-
-                        {/* Validation Non-Blockers */}
-                        {healthCheckData.validationNonBlocker && healthCheckData.validationNonBlocker.length > 0 && (
-                          <Grid item xs={12}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Chip label="Warnings" size="small" color="warning" />
-                              {healthCheckData.validationNonBlocker.length} non-blocking issue{healthCheckData.validationNonBlocker.length > 1 ? 's' : ''}
-                            </Typography>
-                            {healthCheckData.validationNonBlocker.map((issue, idx) => (
-                              <Accordion key={idx} sx={{ mb: 2 }}>
-                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Chip label="Warning" size="small" color="warning" />
-                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                      {issue.issueCategory}: {issue.issueDescription}
-                                    </Typography>
-                                  </Box>
-                                </AccordionSummary>
-                                <AccordionDetails>
-                                  <Grid container spacing={2}>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Issue Category
-                                      </Typography>
-                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                        {issue.issueCategory}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Profile Name
-                                      </Typography>
-                                      <Typography variant="body2" fontFamily="monospace">
-                                        {issue.profileName}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Profile Type
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.profileType}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Assigned Scope
-                                      </Typography>
-                                      <Typography variant="body2" fontFamily="monospace">
-                                        {issue.assignedScope}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={12}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Issue Description
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.issueDescription}
-                                      </Typography>
-                                    </Grid>
-                                    <Grid item xs={12}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Recommended Action
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.recommendedAction}
-                                      </Typography>
-                                    </Grid>
-                                    {issue.timestamp && (
-                                      <Grid item xs={6}>
-                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                          Timestamp
-                                        </Typography>
-                                        <Typography variant="body2">
-                                          {formatTimestamp(parseInt(issue.timestamp))}
-                                        </Typography>
-                                      </Grid>
-                                    )}
-                                    <Grid item xs={6}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        Scope Type
-                                      </Typography>
-                                      <Typography variant="body2">
-                                        {issue.assignedScopeType}
-                                      </Typography>
-                                    </Grid>
-                                  </Grid>
-                                </AccordionDetails>
-                              </Accordion>
-                            ))}
-                          </Grid>
-                        )}
-
-                        {/* Config Distribution Issues */}
-                        {healthCheckData.configDistribution && healthCheckData.configDistribution.length > 0 && (
-                          <Grid item xs={12}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Chip label="Distribution" size="small" color="info" />
-                              {healthCheckData.configDistribution.length} distribution issue{healthCheckData.configDistribution.length > 1 ? 's' : ''}
-                            </Typography>
-                            {healthCheckData.configDistribution.map((issue, idx) => (
-                              <Accordion key={idx} sx={{ mb: 2 }}>
-                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Chip label="Distribution" size="small" color="info" />
-                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                      {issue.issueCategory || 'Config Distribution Issue'}
-                                    </Typography>
-                                  </Box>
-                                </AccordionSummary>
-                                <AccordionDetails>
-                                  <Typography variant="body2">
-                                    {issue.issueDescription || JSON.stringify(issue, null, 2)}
-                                  </Typography>
-                                </AccordionDetails>
-                              </Accordion>
-                            ))}
-                          </Grid>
-                        )}
-
-                        {/* Config Import Issues */}
-                        {healthCheckData.configImport && healthCheckData.configImport.length > 0 && (
-                          <Grid item xs={12}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Chip label="Import" size="small" color="info" />
-                              {healthCheckData.configImport.length} import issue{healthCheckData.configImport.length > 1 ? 's' : ''}
-                            </Typography>
-                            {healthCheckData.configImport.map((issue, idx) => (
-                              <Accordion key={idx} sx={{ mb: 2 }}>
-                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Chip label="Import" size="small" color="info" />
-                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                      {issue.issueCategory || 'Config Import Issue'}
-                                    </Typography>
-                                  </Box>
-                                </AccordionSummary>
-                                <AccordionDetails>
-                                  <Typography variant="body2">
-                                    {issue.issueDescription || JSON.stringify(issue, null, 2)}
-                                  </Typography>
-                                </AccordionDetails>
-                              </Accordion>
-                            ))}
-                          </Grid>
-                        )}
-
-                        {/* No Issues */}
-                        {(!healthCheckData.validationBlocker || healthCheckData.validationBlocker.length === 0) &&
-                         (!healthCheckData.validationNonBlocker || healthCheckData.validationNonBlocker.length === 0) &&
-                         (!healthCheckData.configDistribution || healthCheckData.configDistribution.length === 0) &&
-                         (!healthCheckData.configImport || healthCheckData.configImport.length === 0) && (
-                          <Grid item xs={12}>
-                            <Alert severity="success">
-                              No configuration health issues found. Device configuration is healthy.
-                            </Alert>
-                          </Grid>
-                        )}
-                      </Grid>
-                    )}
-                  </AccordionDetails>
-                </Accordion>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-
-        {/* Additional Device Details - Collapsible */}
-        <Grid item xs={12}>
-          <Accordion defaultExpanded>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                Additional Details
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={4}>
-                  <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      CPU Usage
-                    </Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 600, color: 'primary.main' }}>
-                      {device?.cpuUtilization || 'N/A'}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      Memory Usage
-                    </Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 600, color: 'primary.main' }}>
-                      {device?.memUtilization || 'N/A'}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      Power (5-min avg)
-                    </Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 600, color: 'primary.main' }}>
-                      {powerData !== null ? `${powerData.toFixed(2)} W` : 'N/A'}
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </AccordionDetails>
-          </Accordion>
-        </Grid>
       </Grid>
 
       {/* Action Confirmation Dialog */}
@@ -2920,6 +2278,346 @@ function DeviceDetailPage() {
             disabled={actionLoading}
           >
             {actionLoading ? <CircularProgress size={24} /> : 'Confirm'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Device Health Check Dialog */}
+      <Dialog
+        open={healthCheckDialogOpen}
+        onClose={() => {
+          setHealthCheckDialogOpen(false);
+          setHealthCheckError('');
+          setHealthCheckData(null);
+        }}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <HealthAndSafetyIcon color="primary" />
+              <Typography variant="h6">Device Health Check</Typography>
+              {healthCheckData && (
+                <>
+                  {healthCheckData.validationBlocker?.length > 0 && (
+                    <Chip 
+                      label={`${healthCheckData.validationBlocker.length} Blocker${healthCheckData.validationBlocker.length > 1 ? 's' : ''}`}
+                      size="small"
+                      color="error"
+                      sx={{ ml: 1 }}
+                    />
+                  )}
+                  {healthCheckData.validationNonBlocker?.length > 0 && (
+                    <Chip 
+                      label={`${healthCheckData.validationNonBlocker.length} Warning${healthCheckData.validationNonBlocker.length > 1 ? 's' : ''}`}
+                      size="small"
+                      color="warning"
+                      sx={{ ml: 1 }}
+                    />
+                  )}
+                  {(!healthCheckData.validationBlocker || healthCheckData.validationBlocker.length === 0) &&
+                   (!healthCheckData.validationNonBlocker || healthCheckData.validationNonBlocker.length === 0) &&
+                   (!healthCheckData.configDistribution || healthCheckData.configDistribution.length === 0) &&
+                   (!healthCheckData.configImport || healthCheckData.configImport.length === 0) && (
+                    <Chip 
+                      label="Healthy"
+                      size="small"
+                      color="success"
+                      sx={{ ml: 1 }}
+                    />
+                  )}
+                </>
+              )}
+            </Box>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleHealthCheck();
+              }}
+              disabled={healthCheckLoading}
+              startIcon={healthCheckLoading ? <CircularProgress size={16} /> : <HealthAndSafetyIcon />}
+            >
+              Refresh
+            </Button>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {healthCheckLoading && !healthCheckData && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+              <CircularProgress />
+            </Box>
+          )}
+          
+          {healthCheckError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {healthCheckError}
+            </Alert>
+          )}
+
+          {healthCheckData && (
+            <Grid container spacing={2}>
+              {/* Validation Blockers */}
+              {healthCheckData.validationBlocker && healthCheckData.validationBlocker.length > 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip label="Blockers" size="small" color="error" />
+                    {healthCheckData.validationBlocker.length} issue{healthCheckData.validationBlocker.length > 1 ? 's' : ''} preventing configuration
+                  </Typography>
+                  {healthCheckData.validationBlocker.map((issue, idx) => (
+                    <Accordion key={idx} sx={{ mb: 2 }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Chip label="Blocker" size="small" color="error" />
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {issue.issueCategory}: {issue.issueDescription}
+                          </Typography>
+                        </Box>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                        <Grid container spacing={1.5}>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Issue Category
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {issue.issueCategory}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Profile Name
+                            </Typography>
+                            <Typography variant="body2" fontFamily="monospace">
+                              {issue.profileName}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Profile Type
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.profileType}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Assigned Scope
+                            </Typography>
+                            <Typography variant="body2" fontFamily="monospace">
+                              {issue.assignedScope}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Issue Description
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.issueDescription}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Recommended Action
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.recommendedAction}
+                            </Typography>
+                          </Grid>
+                          {issue.timestamp && (
+                            <Grid item xs={6}>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                                Timestamp
+                              </Typography>
+                              <Typography variant="body2">
+                                {formatTimestamp(parseInt(issue.timestamp))}
+                              </Typography>
+                            </Grid>
+                          )}
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Scope Type
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.assignedScopeType}
+                            </Typography>
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  ))}
+                </Grid>
+              )}
+
+              {/* Validation Non-Blockers */}
+              {healthCheckData.validationNonBlocker && healthCheckData.validationNonBlocker.length > 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip label="Warnings" size="small" color="warning" />
+                    {healthCheckData.validationNonBlocker.length} non-blocking issue{healthCheckData.validationNonBlocker.length > 1 ? 's' : ''}
+                  </Typography>
+                  {healthCheckData.validationNonBlocker.map((issue, idx) => (
+                    <Accordion key={idx} sx={{ mb: 2 }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Chip label="Warning" size="small" color="warning" />
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {issue.issueCategory}: {issue.issueDescription}
+                          </Typography>
+                        </Box>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                        <Grid container spacing={1.5}>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Issue Category
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {issue.issueCategory}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Profile Name
+                            </Typography>
+                            <Typography variant="body2" fontFamily="monospace">
+                              {issue.profileName}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Profile Type
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.profileType}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Assigned Scope
+                            </Typography>
+                            <Typography variant="body2" fontFamily="monospace">
+                              {issue.assignedScope}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Issue Description
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.issueDescription}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Recommended Action
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.recommendedAction}
+                            </Typography>
+                          </Grid>
+                          {issue.timestamp && (
+                            <Grid item xs={6}>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                                Timestamp
+                              </Typography>
+                              <Typography variant="body2">
+                                {formatTimestamp(parseInt(issue.timestamp))}
+                              </Typography>
+                            </Grid>
+                          )}
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.25 }}>
+                              Scope Type
+                            </Typography>
+                            <Typography variant="body2">
+                              {issue.assignedScopeType}
+                            </Typography>
+                          </Grid>
+                        </Grid>
+                      </AccordionDetails>
+                    </Accordion>
+                  ))}
+                </Grid>
+              )}
+
+              {/* Config Distribution Issues */}
+              {healthCheckData.configDistribution && healthCheckData.configDistribution.length > 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip label="Distribution" size="small" color="info" />
+                    {healthCheckData.configDistribution.length} distribution issue{healthCheckData.configDistribution.length > 1 ? 's' : ''}
+                  </Typography>
+                  {healthCheckData.configDistribution.map((issue, idx) => (
+                    <Accordion key={idx} sx={{ mb: 2 }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Chip label="Distribution" size="small" color="info" />
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {issue.issueCategory || 'Config Distribution Issue'}
+                          </Typography>
+                        </Box>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                        <Typography variant="body2">
+                          {issue.issueDescription || JSON.stringify(issue, null, 2)}
+                        </Typography>
+                      </AccordionDetails>
+                    </Accordion>
+                  ))}
+                </Grid>
+              )}
+
+              {/* Config Import Issues */}
+              {healthCheckData.configImport && healthCheckData.configImport.length > 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip label="Import" size="small" color="info" />
+                    {healthCheckData.configImport.length} import issue{healthCheckData.configImport.length > 1 ? 's' : ''}
+                  </Typography>
+                  {healthCheckData.configImport.map((issue, idx) => (
+                    <Accordion key={idx} sx={{ mb: 2 }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Chip label="Import" size="small" color="info" />
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {issue.issueCategory || 'Config Import Issue'}
+                          </Typography>
+                        </Box>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ pt: 1.5, pb: 1.5 }}>
+                        <Typography variant="body2">
+                          {issue.issueDescription || JSON.stringify(issue, null, 2)}
+                        </Typography>
+                      </AccordionDetails>
+                    </Accordion>
+                  ))}
+                </Grid>
+              )}
+
+              {/* No Issues */}
+              {(!healthCheckData.validationBlocker || healthCheckData.validationBlocker.length === 0) &&
+               (!healthCheckData.validationNonBlocker || healthCheckData.validationNonBlocker.length === 0) &&
+               (!healthCheckData.configDistribution || healthCheckData.configDistribution.length === 0) &&
+               (!healthCheckData.configImport || healthCheckData.configImport.length === 0) && (
+                <Grid item xs={12}>
+                  <Alert severity="success">
+                    No configuration health issues found. Device configuration is healthy.
+                  </Alert>
+                </Grid>
+              )}
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setHealthCheckDialogOpen(false);
+            setHealthCheckError('');
+            setHealthCheckData(null);
+          }}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>
@@ -3152,6 +2850,7 @@ function DeviceDetailPage() {
             <TroubleshootActionForm
               action={troubleshootAction}
               deviceSerial={resolvedSerial}
+              siteId={device?.siteId}
               onBack={() => {
                 setTroubleshootAction(null);
                 setTroubleshootResult(null);
@@ -3252,12 +2951,141 @@ function DeviceDetailPage() {
 }
 
 // Troubleshoot Action Form Component
-function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loading, result, error, showCommandsList }) {
+function TroubleshootActionForm({ action, deviceSerial, siteId, onBack, onExecute, loading, result, error, showCommandsList }) {
   const [formData, setFormData] = useState({});
   const [listCommandsMode, setListCommandsMode] = useState(false);
+  const [refreshingPortStatus, setRefreshingPortStatus] = useState(false);
+  const [refreshedPortStatus, setRefreshedPortStatus] = useState(null);
+  const [autoRefreshActive, setAutoRefreshActive] = useState(false);
+  const intervalRef = useRef(null);
+  const portStatusRef = useRef(null);
 
   // Safety check: ensure result is an object or null
   const safeResult = result && typeof result === 'object' ? result : null;
+  
+  // Refresh port status after bounce
+  const handleRefreshPortStatus = async () => {
+    if (!formData.port || !deviceSerial) return;
+    
+    setRefreshingPortStatus(true);
+    try {
+      const interfaces = await deviceAPI.getSwitchInterfaces(deviceSerial, siteId);
+      if (interfaces && interfaces.items) {
+        const port = interfaces.items.find(p => {
+          const portId = p.id || p.name || '';
+          return portId === formData.port || portId.endsWith(`/${formData.port}`) || portId.includes(formData.port);
+        });
+        if (port) {
+          const newStatus = {
+            operStatus: port.operStatus || 'Unknown',
+            adminStatus: port.adminStatus || 'Unknown',
+            id: port.id || port.name || formData.port,
+            name: port.name || port.id || formData.port,
+          };
+          portStatusRef.current = newStatus;
+          setRefreshedPortStatus(newStatus);
+          
+          // If port is Up, stop auto-refresh
+          if (newStatus.operStatus === 'Up' && !newStatus.error && intervalRef.current) {
+            setAutoRefreshActive(false);
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+        } else {
+          const errorStatus = { error: 'Port not found in interface list' };
+          portStatusRef.current = errorStatus;
+          setRefreshedPortStatus(errorStatus);
+        }
+      } else {
+        const errorStatus = { error: 'Could not retrieve interfaces' };
+        portStatusRef.current = errorStatus;
+        setRefreshedPortStatus(errorStatus);
+      }
+    } catch (err) {
+      console.error('Error refreshing port status:', err);
+      const errorStatus = { error: err.message || 'Failed to refresh port status' };
+      portStatusRef.current = errorStatus;
+      setRefreshedPortStatus(errorStatus);
+    } finally {
+      setRefreshingPortStatus(false);
+    }
+  };
+
+  // Auto-refresh port status every 3 seconds after port bounce
+  useEffect(() => {
+    if (action !== 'port-bounce' || !safeResult || !formData.port || !deviceSerial) {
+      setAutoRefreshActive(false);
+      portStatusRef.current = null;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    // Initialize port status ref with current status
+    portStatusRef.current = refreshedPortStatus || safeResult.portStatus || null;
+
+    // Check if port is already Up - if so, don't auto-refresh
+    const currentStatus = refreshedPortStatus || safeResult.portStatus;
+    if (currentStatus && currentStatus.operStatus === 'Up' && !currentStatus.error) {
+      setAutoRefreshActive(false);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    setAutoRefreshActive(true);
+
+    // Initial refresh after 2 seconds
+    const initialTimeout = setTimeout(() => {
+      handleRefreshPortStatus();
+    }, 2000);
+
+    // Then refresh every 3 seconds
+    intervalRef.current = setInterval(async () => {
+      // Check current status using ref (has latest value)
+      const currentStatus = portStatusRef.current || refreshedPortStatus || safeResult.portStatus;
+      if (currentStatus && currentStatus.operStatus === 'Up' && !currentStatus.error) {
+        // Port is Up - stop auto-refresh
+        setAutoRefreshActive(false);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        return;
+      }
+      // Port is still Down - refresh the status
+      await handleRefreshPortStatus();
+    }, 3000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      setAutoRefreshActive(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action, safeResult, formData.port, deviceSerial, siteId]);
+
+  // Stop auto-refresh when port comes up
+  useEffect(() => {
+    const currentStatus = refreshedPortStatus || safeResult?.portStatus;
+    if (currentStatus) {
+      portStatusRef.current = currentStatus;
+    }
+    if (currentStatus && currentStatus.operStatus === 'Up' && !currentStatus.error) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      setAutoRefreshActive(false);
+    }
+  }, [refreshedPortStatus, safeResult]);
 
   const handleListCommands = () => {
     setListCommandsMode(true);
@@ -3266,6 +3094,8 @@ function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loadi
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    setRefreshedPortStatus(null); // Reset refreshed status when executing new action
+    portStatusRef.current = null; // Reset ref as well
     onExecute(formData);
   };
 
@@ -3496,12 +3326,133 @@ function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loadi
       )}
       {safeResult && (
         <Alert 
-          severity={safeResult.status === 'FAILED' || safeResult.status === 'TIMEOUT' ? 'error' : 'success'} 
+          severity={
+            // For port-bounce, "Timed Out" failReason is expected when port has no device connected
+            action === 'port-bounce' && safeResult.failReason === 'Timed Out' && safeResult.status === 'COMPLETED'
+              ? 'warning'
+              : safeResult.status === 'FAILED' || safeResult.status === 'TIMEOUT'
+              ? 'error'
+              : 'success'
+          } 
           sx={{ mb: 2 }}
         >
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
             {safeResult.status || safeResult.task_id ? `Status: ${safeResult.status || 'Unknown'}` : 'Result'}
           </Typography>
+          
+          {/* Port bounce results - handle special structure */}
+          {action === 'port-bounce' && safeResult && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                Port Bounce Results
+                {safeResult.failReason && ` - ${safeResult.failReason}`}
+              </Typography>
+              {safeResult.failReason === 'Timed Out' && (
+                <Typography variant="body2" sx={{ mb: 1, fontStyle: 'italic' }}>
+                  Note: This is expected when the port has no device connected.
+                </Typography>
+              )}
+              {safeResult.warning && (
+                <Alert severity="warning" sx={{ mb: 1 }}>
+                  {safeResult.warning}
+                </Alert>
+              )}
+              
+              {/* Port Status Display */}
+              {(safeResult.portStatus || refreshedPortStatus) && (
+                <Box sx={{ mb: 2, p: 1.5, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        Port Status {refreshedPortStatus ? '(Refreshed)' : 'After Bounce'}:
+                      </Typography>
+                      {autoRefreshActive && (
+                        <Chip 
+                          label="Auto-refreshing every 3s" 
+                          size="small" 
+                          color="info"
+                          icon={<CircularProgress size={12} />}
+                        />
+                      )}
+                    </Box>
+                    {action === 'port-bounce' && formData.port && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={handleRefreshPortStatus}
+                        disabled={refreshingPortStatus}
+                        startIcon={refreshingPortStatus ? <CircularProgress size={16} /> : <UpdateIcon />}
+                      >
+                        {refreshingPortStatus ? 'Refreshing...' : 'Refresh Status'}
+                      </Button>
+                    )}
+                  </Box>
+                  {(refreshedPortStatus || safeResult.portStatus) && (
+                    <>
+                      <Grid container spacing={2}>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            Port ID
+                          </Typography>
+                          <Typography variant="body2" fontFamily="monospace">
+                            {(refreshedPortStatus || safeResult.portStatus).id || (refreshedPortStatus || safeResult.portStatus).name || 'N/A'}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            Operational Status
+                          </Typography>
+                          <Chip 
+                            label={(refreshedPortStatus || safeResult.portStatus).operStatus || 'Unknown'} 
+                            size="small"
+                            color={(refreshedPortStatus || safeResult.portStatus).operStatus === 'Up' ? 'success' : (refreshedPortStatus || safeResult.portStatus).operStatus === 'Down' ? 'error' : 'default'}
+                            sx={{ mt: 0.5 }}
+                          />
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            Administrative Status
+                          </Typography>
+                          <Chip 
+                            label={(refreshedPortStatus || safeResult.portStatus).adminStatus || 'Unknown'} 
+                            size="small"
+                            color={(refreshedPortStatus || safeResult.portStatus).adminStatus === 'Up' ? 'success' : 'default'}
+                            sx={{ mt: 0.5 }}
+                          />
+                        </Grid>
+                      </Grid>
+                      {((refreshedPortStatus || safeResult.portStatus).operStatus === 'Down' || (refreshedPortStatus || safeResult.portStatus).error) && (
+                        <Alert severity={refreshedPortStatus?.error ? 'warning' : 'info'} sx={{ mt: 1 }}>
+                          <Typography variant="body2">
+                            {refreshedPortStatus?.error 
+                              ? refreshedPortStatus.error
+                              : 'Port is currently Down. If a device is connected, it may take 10-30 seconds for the port to come back up. ' + (autoRefreshActive ? 'Status is being checked automatically every 3 seconds.' : 'Use the Refresh Status button to check again.')}
+                          </Typography>
+                        </Alert>
+                      )}
+                      {(refreshedPortStatus || safeResult.portStatus).operStatus === 'Up' && (
+                        <Alert severity="success" sx={{ mt: 1 }}>
+                          <Typography variant="body2">
+                            Port is Up and operational.
+                          </Typography>
+                        </Alert>
+                      )}
+                    </>
+                  )}
+                </Box>
+              )}
+              
+              <Typography variant="body2" component="pre" sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace', bgcolor: 'background.paper', p: 1, borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
+                {safeResult.status && `Status: ${safeResult.status}\n`}
+                {safeResult.progressPercent !== undefined && `Progress: ${safeResult.progressPercent}%\n`}
+                {safeResult.failReason && `Fail Reason: ${safeResult.failReason}\n`}
+                {safeResult.startTime && `Start Time: ${safeResult.startTime}\n`}
+                {safeResult.endTime && `End Time: ${safeResult.endTime}\n`}
+                {safeResult.output !== null && safeResult.output !== undefined && `Output: ${safeResult.output}\n`}
+                {safeResult.message && `\n${safeResult.message}\n`}
+              </Typography>
+            </Box>
+          )}
           
           {/* Ping results - handle special structure */}
           {action === 'ping' && safeResult.replies && Array.isArray(safeResult.replies) && (
@@ -3542,8 +3493,8 @@ function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loadi
             </Box>
           )}
           
-          {/* Standard output field - show if not ping or cable-test with special display */}
-          {!((action === 'ping' && safeResult.replies) || (action === 'cable-test')) && safeResult.output !== undefined && safeResult.output !== null && (
+          {/* Standard output field - show if not ping, cable-test, or port-bounce with special display */}
+          {!((action === 'ping' && safeResult.replies) || (action === 'cable-test') || (action === 'port-bounce')) && safeResult.output !== undefined && safeResult.output !== null && (
             <Typography 
               variant="body2" 
               component="pre" 
@@ -3553,8 +3504,8 @@ function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loadi
             </Typography>
           )}
           
-          {/* Result field - show if not ping or cable-test with special display */}
-          {!((action === 'ping' && safeResult.replies) || (action === 'cable-test')) && !safeResult.output && safeResult.result !== undefined && safeResult.result !== null && (
+          {/* Result field - show if not ping, cable-test, or port-bounce with special display */}
+          {!((action === 'ping' && safeResult.replies) || (action === 'cable-test') || (action === 'port-bounce')) && !safeResult.output && safeResult.result !== undefined && safeResult.result !== null && (
             <Typography 
               variant="body2" 
               component="pre" 
@@ -3572,7 +3523,7 @@ function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loadi
           )}
           
           {/* Fallback: show full JSON if no specific fields found */}
-          {!safeResult.output && !safeResult.result && !safeResult.error && !(action === 'ping' && safeResult.replies) && !(action === 'cable-test') && (
+          {!safeResult.output && !safeResult.result && !safeResult.error && !(action === 'ping' && safeResult.replies) && !(action === 'cable-test') && !(action === 'port-bounce') && (
             <Typography 
               variant="body2" 
               component="pre" 

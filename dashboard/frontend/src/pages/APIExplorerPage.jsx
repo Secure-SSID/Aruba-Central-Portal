@@ -1617,7 +1617,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/poe-bounce',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/poeBounce',
     method: 'POST',
     description: 'Initiate a PoE Bounce test on a CX Switch',
     params: {},
@@ -1626,7 +1626,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/poe-bounce/async-operations/{task-id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/poeBounce/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch PoE Bounce test status and results',
     params: {},
@@ -1634,7 +1634,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/port-bounce',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/portBounce',
     method: 'POST',
     description: 'Initiate a Port Bounce test on a CX Switch',
     params: {},
@@ -1643,7 +1643,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/port-bounce/async-operations/{task-id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/portBounce/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Port Bounce test status and results',
     params: {},
@@ -1651,7 +1651,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/cable-test',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/cableTest',
     method: 'POST',
     description: 'Initiate a Cable Test on a CX Switch',
     params: {},
@@ -1660,7 +1660,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/cable-test/async-operations/{task-id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/cableTest/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Cable Test status and results',
     params: {},
@@ -1668,7 +1668,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/http-test',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/httpTest',
     method: 'POST',
     description: 'Initiate a Http test on a CX Switch',
     params: {},
@@ -1677,7 +1677,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/http-test/async-operations/{task-id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/httpTest/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Http test status and results',
     params: {},
@@ -1685,7 +1685,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/aaa-test',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/aaaTest',
     method: 'POST',
     description: 'Initiate a Aaa test on a CX Switch',
     params: {},
@@ -1694,7 +1694,7 @@ const COMMON_ENDPOINTS = [
     category: 'Troubleshooting'
   },
   {
-    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/aaa-test/async-operations/{task-id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/aaaTest/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Aaa test status and results',
     params: {},

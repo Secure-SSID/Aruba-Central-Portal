@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='../frontend/build', static_url_path='')
-CORS(app, origins=['http://localhost:3000', 'http://localhost:1344'])
+CORS(app, origins=['http://localhost:1344', 'http://localhost:5000'])
 
 # Enable compression (gzip and brotli)
 Compress(app)
@@ -1569,7 +1569,7 @@ def troubleshoot_cx_poe_bounce():
     """Execute POE bounce test on CX switch using async API.
     
     Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxpoebounce
-    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/poe-bounce
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/poeBounce
     """
     try:
         data = request.get_json()
@@ -1581,7 +1581,7 @@ def troubleshoot_cx_poe_bounce():
 
         try:
             response = aruba_client.post(
-                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/poe-bounce',
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/poeBounce',
                 data={"port": port}
             )
             
@@ -1609,7 +1609,7 @@ def troubleshoot_cx_poe_bounce():
                     }), 504
                 
                 async_response = aruba_client.get(
-                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/poe-bounce/async-operations/{task_id}'
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/poeBounce/async-operations/{task_id}'
                 )
                 
                 status = async_response.get('status', 'UNKNOWN')
@@ -1637,21 +1637,56 @@ def troubleshoot_cx_poe_bounce():
             }), 504
             
         except Exception as terr:
-            if '400' in str(terr) or '404' in str(terr):
-                return jsonify({"status": "unavailable", "result": None})
+            # Properly handle HTTP errors from requests library
+            import requests
+            if isinstance(terr, requests.HTTPError):
+                status_code = terr.response.status_code if hasattr(terr, 'response') and terr.response else None
+                error_text = terr.response.text if hasattr(terr, 'response') and terr.response else str(terr)
+                
+                logger.error(
+                    f"POE bounce API error: HTTP {status_code} - {error_text[:500] if error_text else 'Unknown error'}"
+                )
+                
+                # Return more informative error message
+                if status_code in (400, 404):
+                    error_msg = error_text if error_text and len(error_text) < 200 else "POE bounce operation is not available for this device or port"
+                    return jsonify({
+                        "status": "unavailable",
+                        "result": None,
+                        "error": error_msg,
+                        "status_code": status_code
+                    }), status_code
+                else:
+                    # For other HTTP errors, return the actual error
+                    return jsonify({
+                        "status": "error",
+                        "error": error_text[:200] if error_text else str(terr),
+                        "status_code": status_code
+                    }), status_code if status_code else 500
+            elif '400' in str(terr) or '404' in str(terr):
+                # Fallback for string-based checks
+                logger.warning(f"POE bounce error (string check): {terr}")
+                return jsonify({
+                    "status": "unavailable",
+                    "result": None,
+                    "error": "POE bounce operation is not available. This may indicate the device or port does not support this operation."
+                }), 404
             raise terr
     except Exception as e:
-        logger.error(f"POE bounce troubleshooting error: {e}")
+        logger.error(f"POE bounce troubleshooting error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/troubleshoot/cx/port-bounce', methods=['POST'])
 @require_session
 def troubleshoot_cx_port_bounce():
-    """Execute port bounce test on CX switch using async API.
+    """Execute port bounce test on switch using async API.
     
-    Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxportbounce
-    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/port-bounce
+    Tries CX endpoint first, falls back to AOS-S endpoint if CX fails.
+    
+    CX Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxportbounce
+    CX Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/port-bounce
+    AOS-S Endpoint: /troubleshooting/v1alpha1/switches/{serial}/port-bounce
     """
     try:
         data = request.get_json()
@@ -1661,10 +1696,12 @@ def troubleshoot_cx_port_bounce():
         if not device_serial or not port:
             return jsonify({"error": "device_serial and port are required"}), 400
 
+        # Try CX endpoint first
+        cx_failed = False
         try:
             response = aruba_client.post(
-                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/port-bounce',
-                data={"port": port}
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/portBounce',
+                data={"ports": [port]}  # API expects array of ports
             )
             
             location = response.get('location', '')
@@ -1677,9 +1714,9 @@ def troubleshoot_cx_port_bounce():
             task_id = task_id_match.group(1)
             
             # Poll for completion
-            max_attempts = 30
+            max_attempts = 60  # Increased to allow up to 60 seconds
             poll_interval = 1
-            max_wait_time = 30
+            max_wait_time = 60  # Increased timeout to 60 seconds
             
             start_time = time.time()
             for attempt in range(max_attempts):
@@ -1691,20 +1728,119 @@ def troubleshoot_cx_port_bounce():
                     }), 504
                 
                 async_response = aruba_client.get(
-                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/port-bounce/async-operations/{task_id}'
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/portBounce/async-operations/{task_id}'
                 )
                 
                 status = async_response.get('status', 'UNKNOWN')
                 
                 if status == 'COMPLETED':
-                    return jsonify(async_response)
+                    # "Timed Out" in failReason is a valid completion when port has nothing connected
+                    fail_reason = async_response.get('failReason', '')
+                    
+                    # Check port status after bounce completes (wait 2 seconds for port to stabilize)
+                    port_status = None
+                    try:
+                        time.sleep(2)  # Wait for port to stabilize after bounce
+                        # Try to get port status
+                        try:
+                            # Parse port identifier (e.g., "1/1/13" -> need to URL encode)
+                            import urllib.parse
+                            encoded_port = urllib.parse.quote(port, safe='')
+                            port_status_response = aruba_client.get(
+                                f'/network-monitoring/v1alpha1/switch/{device_serial}/interfaces/{encoded_port}'
+                            )
+                            if port_status_response:
+                                port_status = {
+                                    "operStatus": port_status_response.get('operStatus', 'Unknown'),
+                                    "adminStatus": port_status_response.get('adminStatus', 'Unknown'),
+                                    "id": port_status_response.get('id', port),
+                                    "name": port_status_response.get('name', port),
+                                }
+                        except Exception as port_check_err:
+                            logger.warning(f"Could not check port status after bounce: {port_check_err}")
+                            port_status = {"error": "Could not retrieve port status", "note": "Port may still be recovering"}
+                    
+                    except Exception as e:
+                        logger.warning(f"Error checking port status: {e}")
+                    
+                    result = {**async_response}
+                    if port_status:
+                        result["portStatus"] = port_status
+                    
+                    if fail_reason == 'Timed Out':
+                        # This is expected when port has no device connected - return as success
+                        result["message"] = "Port bounce completed. Note: Port may have no device connected (Timed Out)."
+                    else:
+                        result["message"] = "Port bounce completed successfully."
+                        if port_status and port_status.get('operStatus') == 'Down':
+                            result["warning"] = "Port is currently Down. It may take a few seconds to come back up if a device is connected."
+                    
+                    return jsonify(result)
                 elif status == 'FAILED':
                     fail_reason = async_response.get('failReason', 'Unknown error')
-                    return jsonify({
+                    # "Timed Out" is not a failure - it's expected when port has nothing connected
+                    if fail_reason == 'Timed Out':
+                        # Check port status
+                        port_status = None
+                        try:
+                            time.sleep(2)
+                            try:
+                                import urllib.parse
+                                encoded_port = urllib.parse.quote(port, safe='')
+                                port_status_response = aruba_client.get(
+                                    f'/network-monitoring/v1alpha1/switch/{device_serial}/interfaces/{encoded_port}'
+                                )
+                                if port_status_response:
+                                    port_status = {
+                                        "operStatus": port_status_response.get('operStatus', 'Unknown'),
+                                        "adminStatus": port_status_response.get('adminStatus', 'Unknown'),
+                                        "id": port_status_response.get('id', port),
+                                        "name": port_status_response.get('name', port),
+                                    }
+                            except Exception as port_check_err:
+                                logger.warning(f"Could not check port status after bounce: {port_check_err}")
+                        except Exception as e:
+                            logger.warning(f"Error checking port status: {e}")
+                        
+                        result = {
+                            **async_response,
+                            "status": "COMPLETED",
+                            "message": "Port bounce completed. Note: Port may have no device connected (Timed Out)."
+                        }
+                        if port_status:
+                            result["portStatus"] = port_status
+                        return jsonify(result)
+                    
+                    # For actual failures, still try to check port status
+                    port_status = None
+                    try:
+                        time.sleep(2)
+                        try:
+                            import urllib.parse
+                            encoded_port = urllib.parse.quote(port, safe='')
+                            port_status_response = aruba_client.get(
+                                f'/network-monitoring/v1alpha1/switch/{device_serial}/interfaces/{encoded_port}'
+                            )
+                            if port_status_response:
+                                port_status = {
+                                    "operStatus": port_status_response.get('operStatus', 'Unknown'),
+                                    "adminStatus": port_status_response.get('adminStatus', 'Unknown'),
+                                    "id": port_status_response.get('id', port),
+                                    "name": port_status_response.get('name', port),
+                                }
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    
+                    error_response = {
                         "error": f"Port bounce operation failed: {fail_reason}",
                         "status": "FAILED",
                         "task_id": task_id
-                    }), 500
+                    }
+                    if port_status:
+                        error_response["portStatus"] = port_status
+                    return jsonify(error_response), 500
                 elif status in ['INITIATED', 'IN_PROGRESS']:
                     time.sleep(poll_interval)
                     continue
@@ -1719,11 +1855,111 @@ def troubleshoot_cx_port_bounce():
             }), 504
             
         except Exception as terr:
-            if '400' in str(terr) or '404' in str(terr):
-                return jsonify({"status": "unavailable", "result": None})
+            # Properly handle HTTP errors from requests library
+            import requests
+            if isinstance(terr, requests.HTTPError):
+                status_code = terr.response.status_code if hasattr(terr, 'response') and terr.response else None
+                error_text = terr.response.text if hasattr(terr, 'response') and terr.response else str(terr)
+                
+                # If CX endpoint fails with 404, try AOS-S switch endpoint
+                if status_code == 404:
+                    logger.info(f"CX port bounce endpoint not available for {device_serial}, trying AOS-S endpoint")
+                    try:
+                        # Try AOS-S switch endpoint
+                        response = aruba_client.post(
+                            f'/troubleshooting/v1alpha1/switches/{device_serial}/port-bounce',
+                            data={"port": port}
+                        )
+                        
+                        # AOS-S endpoint returns test_id instead of location
+                        test_id = response.get('test_id')
+                        if not test_id:
+                            return jsonify({"error": "Could not extract test ID from AOS-S response"}), 500
+                        
+                        # Poll for completion with AOS-S endpoint
+                        max_attempts = 30
+                        poll_interval = 1
+                        max_wait_time = 30
+                        
+                        start_time = time.time()
+                        for attempt in range(max_attempts):
+                            if time.time() - start_time > max_wait_time:
+                                return jsonify({
+                                    "error": "Port bounce operation timed out",
+                                    "status": "TIMEOUT",
+                                    "test_id": test_id
+                                }), 504
+                            
+                            async_response = aruba_client.get(
+                                f'/troubleshooting/v1alpha1/switches/{device_serial}/port-bounce/{test_id}'
+                            )
+                            
+                            status = async_response.get('status', 'UNKNOWN')
+                            
+                            if status in ['COMPLETED', 'SUCCESS']:
+                                return jsonify(async_response)
+                            elif status == 'FAILED':
+                                fail_reason = async_response.get('reason', 'Unknown error')
+                                return jsonify({
+                                    "error": f"Port bounce operation failed: {fail_reason}",
+                                    "status": "FAILED",
+                                    "test_id": test_id
+                                }), 500
+                            elif status in ['INITIATED', 'IN_PROGRESS', 'RUNNING']:
+                                time.sleep(poll_interval)
+                                continue
+                            else:
+                                time.sleep(poll_interval)
+                                continue
+                        
+                        return jsonify({
+                            "error": "Port bounce operation did not complete within expected time",
+                            "status": "TIMEOUT",
+                            "test_id": test_id
+                        }), 504
+                        
+                    except Exception as aos_err:
+                        logger.error(f"AOS-S port bounce also failed: {aos_err}")
+                        # Both endpoints failed, return informative error
+                        return jsonify({
+                            "status": "unavailable",
+                            "result": None,
+                            "error": "Port bounce operation is not available for this device. Neither CX nor AOS-S endpoints are supported.",
+                            "cx_error": error_text[:100] if error_text else str(terr),
+                            "aos_error": str(aos_err)[:100]
+                        }), 404
+                
+                # For non-404 errors, return informative error message
+                logger.error(
+                    f"Port bounce API error: HTTP {status_code} - {error_text[:500] if error_text else 'Unknown error'}"
+                )
+                
+                if status_code == 400:
+                    error_msg = error_text if error_text and len(error_text) < 200 else "Port bounce operation is not available for this device or port"
+                    return jsonify({
+                        "status": "unavailable",
+                        "result": None,
+                        "error": error_msg,
+                        "status_code": status_code
+                    }), status_code
+                else:
+                    # For other HTTP errors, return the actual error
+                    return jsonify({
+                        "status": "error",
+                        "error": error_text[:200] if error_text else str(terr),
+                        "status_code": status_code
+                    }), status_code if status_code else 500
+            elif '400' in str(terr) or '404' in str(terr):
+                # Fallback for string-based checks
+                logger.warning(f"Port bounce error (string check): {terr}")
+                return jsonify({
+                    "status": "unavailable",
+                    "result": None,
+                    "error": "Port bounce operation is not available. This may indicate the device or port does not support this operation."
+                }), 404
             raise terr
     except Exception as e:
-        logger.error(f"Port bounce troubleshooting error: {e}")
+        logger.error(f"Port bounce troubleshooting error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -1733,7 +1969,7 @@ def troubleshoot_cx_cable_test():
     """Execute cable test on CX switch using async API.
     
     Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxcabletest
-    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/cable-test
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/cableTest
     """
     try:
         data = request.get_json()
@@ -1745,7 +1981,7 @@ def troubleshoot_cx_cable_test():
 
         try:
             response = aruba_client.post(
-                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/cable-test',
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/cableTest',
                 data={"port": port}
             )
             
@@ -1773,7 +2009,7 @@ def troubleshoot_cx_cable_test():
                     }), 504
                 
                 async_response = aruba_client.get(
-                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/cable-test/async-operations/{task_id}'
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/cableTest/async-operations/{task_id}'
                 )
                 
                 status = async_response.get('status', 'UNKNOWN')
@@ -1815,7 +2051,7 @@ def troubleshoot_cx_http_test():
     """Execute HTTP test on CX switch using async API.
     
     Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxhttp
-    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/http-test
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/httpTest
     """
     try:
         data = request.get_json()
@@ -1827,7 +2063,7 @@ def troubleshoot_cx_http_test():
 
         try:
             response = aruba_client.post(
-                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/http-test',
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/httpTest',
                 data={"url": url}
             )
             
@@ -1855,7 +2091,7 @@ def troubleshoot_cx_http_test():
                     }), 504
                 
                 async_response = aruba_client.get(
-                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/http-test/async-operations/{task_id}'
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/httpTest/async-operations/{task_id}'
                 )
                 
                 status = async_response.get('status', 'UNKNOWN')
@@ -1897,7 +2133,7 @@ def troubleshoot_cx_aaa_test():
     """Execute AAA test on CX switch using async API.
     
     Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxaaa
-    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/aaa-test
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/aaaTest
     """
     try:
         data = request.get_json()
@@ -1910,7 +2146,7 @@ def troubleshoot_cx_aaa_test():
 
         try:
             response = aruba_client.post(
-                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/aaa-test',
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/aaaTest',
                 data={"username": username, "password": password}
             )
             
@@ -1938,7 +2174,7 @@ def troubleshoot_cx_aaa_test():
                     }), 504
                 
                 async_response = aruba_client.get(
-                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/aaa-test/async-operations/{task_id}'
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/aaaTest/async-operations/{task_id}'
                 )
                 
                 status = async_response.get('status', 'UNKNOWN')
