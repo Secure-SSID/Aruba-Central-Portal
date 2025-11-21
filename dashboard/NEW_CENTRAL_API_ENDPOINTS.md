@@ -618,7 +618,7 @@ curl -X GET https://internal.api.central.arubanetworks.com/network-monitoring/v1
 
 ---
 
-**Document Version**: 1.0
+**Document Version**: 2.0
 **Last Verified**: November 5, 2025
 **API Status**: Active (v1alpha1)
 **Breaking Changes**: Expected as API moves from alpha to stable

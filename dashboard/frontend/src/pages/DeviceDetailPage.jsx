@@ -36,19 +36,33 @@ import {
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DevicesIcon from '@mui/icons-material/Devices';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import SettingsIcon from '@mui/icons-material/Settings';
 import UpdateIcon from '@mui/icons-material/Update';
-import BugReportIcon from '@mui/icons-material/BugReport';
-import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import InfoIcon from '@mui/icons-material/Info';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import LanIcon from '@mui/icons-material/Lan';
-import { deviceAPI, monitoringAPIv2 } from '../services/api';
+import { deviceAPI, monitoringAPIv2, configAPI, troubleshootAPI } from '../services/api';
 import apiClient from '../services/api';
+import { CDN_PATTERNS, HPE_LOGO_URL, getCdnUrlsForPartNumber } from '../config/cdnUrls';
 import Tooltip from '@mui/material/Tooltip';
+import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
+import BuildIcon from '@mui/icons-material/Build';
+import PingIcon from '@mui/icons-material/NetworkCheck';
+import RouteIcon from '@mui/icons-material/Route';
+import PowerIcon from '@mui/icons-material/Power';
+import CableIcon from '@mui/icons-material/Cable';
+import HttpIcon from '@mui/icons-material/Http';
+import SecurityIcon from '@mui/icons-material/Security';
+import TerminalIcon from '@mui/icons-material/Terminal';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import InputLabel from '@mui/material/InputLabel';
+import FormControl from '@mui/material/FormControl';
+import Paper from '@mui/material/Paper';
+import CodeIcon from '@mui/icons-material/Code';
 
 // Device Image Upload Component with Background Removal
 function DeviceImageUpload({ partNumber, onUploadSuccess }) {
@@ -1291,7 +1305,7 @@ function DeviceHeaderImage({ partNumber }) {
 
     // Special case: Q9H73A only uses this specific URL
     if (partNumber === 'Q9H73A') {
-      setCurrentSrc('https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/Q9H73A.e0f32991.png');
+      setCurrentSrc(CDN_PATTERNS.Q9H73A_SPECIFIC);
       setCdnIndex(0);
       setFormatIndex(0);
       setImageError(false);
@@ -1303,17 +1317,8 @@ function DeviceHeaderImage({ partNumber }) {
     const imagePartNumber = partNumberAliases[partNumber] || partNumber;
 
     // CDN URL patterns to try (recreated when partNumber changes)
-    // Try new 2025 pattern first, then old pattern, then try without hash
-    const cdnPatterns = [
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.3e5127c7.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.10a25695.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.d8474883.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.a0310c52.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/${imagePartNumber}.e0f32991.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/${imagePartNumber}.a0310c52.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/${imagePartNumber}-crop.e6178d42.png`,
-    ];
+    // Use config helper to generate URLs
+    const cdnPatterns = getCdnUrlsForPartNumber(imagePartNumber);
 
     // Start with first CDN pattern
     setCurrentSrc(cdnPatterns[0]);
@@ -1339,17 +1344,8 @@ function DeviceHeaderImage({ partNumber }) {
     // Check if this part number should use an alias
     const imagePartNumber = partNumberAliases[partNumber] || partNumber;
     
-    // CDN URL patterns to try
-    const cdnPatterns = [
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.3e5127c7.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.10a25695.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.d8474883.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.a0310c52.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/2025/udl/v3132/static/media/${imagePartNumber}.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/${imagePartNumber}.e0f32991.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/${imagePartNumber}.a0310c52.png`,
-      `https://diz7hgluhzsxv.cloudfront.net/ui-base/v33191/assets/ui-components/static/media/${imagePartNumber}-crop.e6178d42.png`,
-    ];
+    // CDN URL patterns to try - use config helper
+    const cdnPatterns = getCdnUrlsForPartNumber(imagePartNumber);
     
     // Try next CDN pattern first
     if (cdnIndex < cdnPatterns.length - 1) {
@@ -1471,10 +1467,9 @@ function DeviceImageDisplay({ partNumber, deviceSerial, deviceType, siteId, onRe
       });
   }, []);
 
-  const HPE_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Hewlett_Packard_Enterprise_logo.svg/530px-Hewlett_Packard_Enterprise_logo.svg.png';
   const [imageLoaded, setImageLoaded] = useState(false);
 
-  // Always use HPE logo - no format checking needed
+  // Always use HPE logo - no format checking needed (from config)
   const imagePath = HPE_LOGO_URL;
 
   const handleImageErrorCallback = useCallback(() => {
@@ -1606,6 +1601,15 @@ function DeviceDetailPage() {
   const [tabValue, setTabValue] = useState(0);
   const [deviceNameToSerialMap, setDeviceNameToSerialMap] = useState({});
   const [resolvedSerial, setResolvedSerial] = useState(null);
+  const [healthCheckData, setHealthCheckData] = useState(null);
+  const [healthCheckLoading, setHealthCheckLoading] = useState(false);
+  const [healthCheckError, setHealthCheckError] = useState('');
+  const [troubleshootDialogOpen, setTroubleshootDialogOpen] = useState(false);
+  const [troubleshootAction, setTroubleshootAction] = useState(null);
+  const [troubleshootLoading, setTroubleshootLoading] = useState(false);
+  const [troubleshootResult, setTroubleshootResult] = useState(null);
+  const [troubleshootError, setTroubleshootError] = useState('');
+  const [showCommandsList, setShowCommandsList] = useState([]);
 
   // Build device name to serial mapping
   useEffect(() => {
@@ -1800,21 +1804,9 @@ function DeviceDetailPage() {
     try {
       // Implement actual API calls based on action
       switch (actionDialog.action) {
-        case 'reboot':
-          // await deviceAPI.reboot(resolvedSerial);
-          console.log('Reboot device:', resolvedSerial);
-          break;
-        case 'sync':
-          // await deviceAPI.syncConfig(resolvedSerial);
-          console.log('Sync configuration:', resolvedSerial);
-          break;
         case 'firmware':
           // await deviceAPI.updateFirmware(resolvedSerial);
           console.log('Update firmware:', resolvedSerial);
-          break;
-        case 'diagnostics':
-          // await deviceAPI.runDiagnostics(resolvedSerial);
-          console.log('Run diagnostics:', resolvedSerial);
           break;
         default:
           break;
@@ -1831,6 +1823,27 @@ function DeviceDetailPage() {
 
   const handleActionCancel = () => {
     setActionDialog({ open: false, action: '', title: '' });
+  };
+
+  const handleHealthCheck = async () => {
+    if (!resolvedSerial) {
+      setHealthCheckError('Device serial number is required');
+      return;
+    }
+
+    setHealthCheckLoading(true);
+    setHealthCheckError('');
+    setHealthCheckData(null);
+
+    try {
+      const data = await configAPI.configHealth.getActiveIssues(resolvedSerial);
+      setHealthCheckData(data);
+    } catch (err) {
+      console.error('Error fetching device health:', err);
+      setHealthCheckError(err.response?.data?.error || err.message || 'Failed to fetch device health');
+    } finally {
+      setHealthCheckLoading(false);
+    }
   };
 
   const getStatusColor = (status) => {
@@ -2246,34 +2259,6 @@ function DeviceDetailPage() {
               <List sx={{ pt: 0 }}>
                 <ListItem
                   button
-                  onClick={() => handleActionClick('reboot', 'Reboot Device')}
-                  sx={{ borderRadius: 1, mb: 1 }}
-                >
-                  <ListItemIcon>
-                    <RestartAltIcon color="primary" />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary="Reboot Device"
-                    secondary="Restart the device"
-                  />
-                </ListItem>
-
-                <ListItem
-                  button
-                  onClick={() => handleActionClick('sync', 'Sync Configuration')}
-                  sx={{ borderRadius: 1, mb: 1 }}
-                >
-                  <ListItemIcon>
-                    <CloudSyncIcon color="primary" />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary="Sync Configuration"
-                    secondary="Push latest config"
-                  />
-                </ListItem>
-
-                <ListItem
-                  button
                   onClick={() => handleActionClick('firmware', 'Update Firmware')}
                   sx={{ borderRadius: 1, mb: 1 }}
                 >
@@ -2288,29 +2273,37 @@ function DeviceDetailPage() {
 
                 <ListItem
                   button
-                  onClick={() => handleActionClick('diagnostics', 'Run Diagnostics')}
+                  onClick={handleHealthCheck}
+                  disabled={healthCheckLoading}
                   sx={{ borderRadius: 1, mb: 1 }}
                 >
                   <ListItemIcon>
-                    <BugReportIcon color="primary" />
+                    {healthCheckLoading ? (
+                      <CircularProgress size={24} />
+                    ) : (
+                      <HealthAndSafetyIcon color="primary" />
+                    )}
                   </ListItemIcon>
                   <ListItemText
-                    primary="Run Diagnostics"
-                    secondary="Check device health"
+                    primary="Check Device Health"
+                    secondary="View configuration issues"
                   />
                 </ListItem>
 
                 <ListItem
                   button
-                  onClick={() => navigate(`/devices/${serial}/settings`)}
+                  onClick={() => {
+                    const serial = resolvedSerial || serialOrName;
+                    navigate(`/troubleshoot${serial ? `?device=${encodeURIComponent(serial)}` : ''}`);
+                  }}
                   sx={{ borderRadius: 1 }}
                 >
                   <ListItemIcon>
-                    <SettingsIcon color="primary" />
+                    <BuildIcon color="primary" />
                   </ListItemIcon>
                   <ListItemText
-                    primary="Device Settings"
-                    secondary="Configure device"
+                    primary="Troubleshooting"
+                    secondary="Ping, traceroute, and more"
                   />
                 </ListItem>
               </List>
@@ -2521,6 +2514,340 @@ function DeviceDetailPage() {
           </Grid>
         )}
 
+        {/* Device Health Check Results */}
+        {(healthCheckData || healthCheckError) && (
+          <Grid item xs={12}>
+            <Card>
+              <CardContent>
+                <Accordion defaultExpanded>
+                  <AccordionSummary 
+                    expandIcon={<ExpandMoreIcon />}
+                    sx={{ 
+                      '& .MuiAccordionSummary-content': {
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <HealthAndSafetyIcon color="primary" />
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                        Device Health Check
+                      </Typography>
+                      {healthCheckData && (
+                        <>
+                          {healthCheckData.validationBlocker?.length > 0 && (
+                            <Chip 
+                              label={`${healthCheckData.validationBlocker.length} Blocker${healthCheckData.validationBlocker.length > 1 ? 's' : ''}`}
+                              size="small"
+                              color="error"
+                              sx={{ ml: 1 }}
+                            />
+                          )}
+                          {healthCheckData.validationNonBlocker?.length > 0 && (
+                            <Chip 
+                              label={`${healthCheckData.validationNonBlocker.length} Warning${healthCheckData.validationNonBlocker.length > 1 ? 's' : ''}`}
+                              size="small"
+                              color="warning"
+                              sx={{ ml: 1 }}
+                            />
+                          )}
+                          {(!healthCheckData.validationBlocker || healthCheckData.validationBlocker.length === 0) &&
+                           (!healthCheckData.validationNonBlocker || healthCheckData.validationNonBlocker.length === 0) &&
+                           (!healthCheckData.configDistribution || healthCheckData.configDistribution.length === 0) &&
+                           (!healthCheckData.configImport || healthCheckData.configImport.length === 0) && (
+                            <Chip 
+                              label="Healthy"
+                              size="small"
+                              color="success"
+                              sx={{ ml: 1 }}
+                            />
+                          )}
+                        </>
+                      )}
+                    </Box>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleHealthCheck();
+                      }}
+                      disabled={healthCheckLoading}
+                      startIcon={healthCheckLoading ? <CircularProgress size={16} /> : <HealthAndSafetyIcon />}
+                      sx={{ mr: 2 }}
+                    >
+                      Refresh
+                    </Button>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {healthCheckError && (
+                      <Alert severity="error" sx={{ mb: 2 }}>
+                        {healthCheckError}
+                      </Alert>
+                    )}
+
+                    {healthCheckData && (
+                      <Grid container spacing={2}>
+                        {/* Validation Blockers */}
+                        {healthCheckData.validationBlocker && healthCheckData.validationBlocker.length > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip label="Blockers" size="small" color="error" />
+                              {healthCheckData.validationBlocker.length} issue{healthCheckData.validationBlocker.length > 1 ? 's' : ''} preventing configuration
+                            </Typography>
+                            {healthCheckData.validationBlocker.map((issue, idx) => (
+                              <Accordion key={idx} sx={{ mb: 2 }}>
+                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Chip label="Blocker" size="small" color="error" />
+                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                      {issue.issueCategory}: {issue.issueDescription}
+                                    </Typography>
+                                  </Box>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                  <Grid container spacing={2}>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Issue Category
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                        {issue.issueCategory}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Profile Name
+                                      </Typography>
+                                      <Typography variant="body2" fontFamily="monospace">
+                                        {issue.profileName}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Profile Type
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.profileType}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Assigned Scope
+                                      </Typography>
+                                      <Typography variant="body2" fontFamily="monospace">
+                                        {issue.assignedScope}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={12}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Issue Description
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.issueDescription}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={12}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Recommended Action
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.recommendedAction}
+                                      </Typography>
+                                    </Grid>
+                                    {issue.timestamp && (
+                                      <Grid item xs={6}>
+                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                          Timestamp
+                                        </Typography>
+                                        <Typography variant="body2">
+                                          {formatTimestamp(parseInt(issue.timestamp))}
+                                        </Typography>
+                                      </Grid>
+                                    )}
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Scope Type
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.assignedScopeType}
+                                      </Typography>
+                                    </Grid>
+                                  </Grid>
+                                </AccordionDetails>
+                              </Accordion>
+                            ))}
+                          </Grid>
+                        )}
+
+                        {/* Validation Non-Blockers */}
+                        {healthCheckData.validationNonBlocker && healthCheckData.validationNonBlocker.length > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip label="Warnings" size="small" color="warning" />
+                              {healthCheckData.validationNonBlocker.length} non-blocking issue{healthCheckData.validationNonBlocker.length > 1 ? 's' : ''}
+                            </Typography>
+                            {healthCheckData.validationNonBlocker.map((issue, idx) => (
+                              <Accordion key={idx} sx={{ mb: 2 }}>
+                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Chip label="Warning" size="small" color="warning" />
+                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                      {issue.issueCategory}: {issue.issueDescription}
+                                    </Typography>
+                                  </Box>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                  <Grid container spacing={2}>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Issue Category
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                        {issue.issueCategory}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Profile Name
+                                      </Typography>
+                                      <Typography variant="body2" fontFamily="monospace">
+                                        {issue.profileName}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Profile Type
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.profileType}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Assigned Scope
+                                      </Typography>
+                                      <Typography variant="body2" fontFamily="monospace">
+                                        {issue.assignedScope}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={12}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Issue Description
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.issueDescription}
+                                      </Typography>
+                                    </Grid>
+                                    <Grid item xs={12}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Recommended Action
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.recommendedAction}
+                                      </Typography>
+                                    </Grid>
+                                    {issue.timestamp && (
+                                      <Grid item xs={6}>
+                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                          Timestamp
+                                        </Typography>
+                                        <Typography variant="body2">
+                                          {formatTimestamp(parseInt(issue.timestamp))}
+                                        </Typography>
+                                      </Grid>
+                                    )}
+                                    <Grid item xs={6}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        Scope Type
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {issue.assignedScopeType}
+                                      </Typography>
+                                    </Grid>
+                                  </Grid>
+                                </AccordionDetails>
+                              </Accordion>
+                            ))}
+                          </Grid>
+                        )}
+
+                        {/* Config Distribution Issues */}
+                        {healthCheckData.configDistribution && healthCheckData.configDistribution.length > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip label="Distribution" size="small" color="info" />
+                              {healthCheckData.configDistribution.length} distribution issue{healthCheckData.configDistribution.length > 1 ? 's' : ''}
+                            </Typography>
+                            {healthCheckData.configDistribution.map((issue, idx) => (
+                              <Accordion key={idx} sx={{ mb: 2 }}>
+                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Chip label="Distribution" size="small" color="info" />
+                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                      {issue.issueCategory || 'Config Distribution Issue'}
+                                    </Typography>
+                                  </Box>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                  <Typography variant="body2">
+                                    {issue.issueDescription || JSON.stringify(issue, null, 2)}
+                                  </Typography>
+                                </AccordionDetails>
+                              </Accordion>
+                            ))}
+                          </Grid>
+                        )}
+
+                        {/* Config Import Issues */}
+                        {healthCheckData.configImport && healthCheckData.configImport.length > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip label="Import" size="small" color="info" />
+                              {healthCheckData.configImport.length} import issue{healthCheckData.configImport.length > 1 ? 's' : ''}
+                            </Typography>
+                            {healthCheckData.configImport.map((issue, idx) => (
+                              <Accordion key={idx} sx={{ mb: 2 }}>
+                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                  <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Chip label="Import" size="small" color="info" />
+                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                      {issue.issueCategory || 'Config Import Issue'}
+                                    </Typography>
+                                  </Box>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                  <Typography variant="body2">
+                                    {issue.issueDescription || JSON.stringify(issue, null, 2)}
+                                  </Typography>
+                                </AccordionDetails>
+                              </Accordion>
+                            ))}
+                          </Grid>
+                        )}
+
+                        {/* No Issues */}
+                        {(!healthCheckData.validationBlocker || healthCheckData.validationBlocker.length === 0) &&
+                         (!healthCheckData.validationNonBlocker || healthCheckData.validationNonBlocker.length === 0) &&
+                         (!healthCheckData.configDistribution || healthCheckData.configDistribution.length === 0) &&
+                         (!healthCheckData.configImport || healthCheckData.configImport.length === 0) && (
+                          <Grid item xs={12}>
+                            <Alert severity="success">
+                              No configuration health issues found. Device configuration is healthy.
+                            </Alert>
+                          </Grid>
+                        )}
+                      </Grid>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
         {/* Additional Device Details - Collapsible */}
         <Grid item xs={12}>
           <Accordion defaultExpanded>
@@ -2596,6 +2923,683 @@ function DeviceDetailPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Troubleshooting Dialog */}
+      <Dialog
+        open={troubleshootDialogOpen}
+        onClose={() => {
+          setTroubleshootDialogOpen(false);
+          setTroubleshootAction(null);
+          setTroubleshootResult(null);
+          setTroubleshootError('');
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <BuildIcon color="primary" />
+            <Typography variant="h6">CX Switch Troubleshooting</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {!troubleshootAction ? (
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('ping')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <PingIcon color="primary" />
+                      <Typography variant="h6">Ping</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Test network connectivity to a target host
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('traceroute')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <RouteIcon color="primary" />
+                      <Typography variant="h6">Traceroute</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Trace the network path to a destination
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('poe-bounce')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <PowerIcon color="primary" />
+                      <Typography variant="h6">POE Bounce</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Cycle power on a POE port
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('port-bounce')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <LanIcon color="primary" />
+                      <Typography variant="h6">Port Bounce</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Cycle a switch port (shut/no shut)
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('cable-test')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <CableIcon color="primary" />
+                      <Typography variant="h6">Cable Test</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Test cable integrity and length
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('http-test')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <HttpIcon color="primary" />
+                      <Typography variant="h6">HTTP Test</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Test HTTP connectivity to a URL
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('aaa-test')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <SecurityIcon color="primary" />
+                      <Typography variant="h6">AAA Test</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Test AAA authentication
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('show-command')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <TerminalIcon color="primary" />
+                      <Typography variant="h6">Show Commands</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Run show commands on the switch
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                  }}
+                  onClick={() => setTroubleshootAction('locate')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <LocationOnIcon color="primary" />
+                      <Typography variant="h6">Locate Switch</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Flash LEDs to locate the switch
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    height: '100%',
+                    border: '2px solid',
+                    borderColor: 'error.main',
+                  }}
+                  onClick={() => setTroubleshootAction('reboot')}
+                >
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                      <RestartAltIcon color="error" />
+                      <Typography variant="h6" color="error">Reboot Switch</Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Reboot the switch (use with caution)
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          ) : (
+            <TroubleshootActionForm
+              action={troubleshootAction}
+              deviceSerial={resolvedSerial}
+              onBack={() => {
+                setTroubleshootAction(null);
+                setTroubleshootResult(null);
+                setTroubleshootError('');
+              }}
+              onExecute={async (params) => {
+                setTroubleshootLoading(true);
+                setTroubleshootError('');
+                setTroubleshootResult(null);
+                try {
+                  let result;
+                  switch (troubleshootAction) {
+                    case 'ping':
+                      result = await troubleshootAPI.cxPing(resolvedSerial, params.target);
+                      break;
+                    case 'traceroute':
+                      result = await troubleshootAPI.cxTraceroute(resolvedSerial, params.target);
+                      break;
+                    case 'poe-bounce':
+                      result = await troubleshootAPI.cxPoeBounce(resolvedSerial, params.port);
+                      break;
+                    case 'port-bounce':
+                      result = await troubleshootAPI.cxPortBounce(resolvedSerial, params.port);
+                      break;
+                    case 'cable-test':
+                      result = await troubleshootAPI.cxCableTest(resolvedSerial, params.port);
+                      break;
+                    case 'http-test':
+                      result = await troubleshootAPI.cxHttpTest(resolvedSerial, params.url);
+                      break;
+                    case 'aaa-test':
+                      result = await troubleshootAPI.cxAaaTest(resolvedSerial, params.username, params.password);
+                      break;
+                    case 'show-command':
+                      if (params.listCommands) {
+                        result = await troubleshootAPI.cxListShowCommands(resolvedSerial);
+                        // Handle different response formats
+                        const commands = result?.commands || result?.items || (Array.isArray(result) ? result : []);
+                        setShowCommandsList(commands);
+                      } else {
+                        result = await troubleshootAPI.cxRunShowCommand(resolvedSerial, params.command);
+                      }
+                      break;
+                    case 'locate':
+                      result = await troubleshootAPI.cxLocate(resolvedSerial, params.enable);
+                      break;
+                    case 'reboot':
+                      result = await troubleshootAPI.cxReboot(resolvedSerial);
+                      break;
+                    default:
+                      throw new Error('Unknown action');
+                  }
+                  setTroubleshootResult(result);
+                } catch (err) {
+                  console.error('Troubleshooting operation error:', err);
+                  const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Operation failed';
+                  setTroubleshootError(String(errorMessage));
+                  setTroubleshootResult(null);
+                } finally {
+                  setTroubleshootLoading(false);
+                }
+              }}
+              loading={troubleshootLoading}
+              result={troubleshootResult}
+              error={troubleshootError}
+              showCommandsList={showCommandsList}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          {troubleshootAction ? (
+            <>
+              <Button onClick={() => {
+                setTroubleshootAction(null);
+                setTroubleshootResult(null);
+                setTroubleshootError('');
+              }}>
+                Back
+              </Button>
+              <Button onClick={() => {
+                setTroubleshootDialogOpen(false);
+                setTroubleshootAction(null);
+                setTroubleshootResult(null);
+                setTroubleshootError('');
+              }}>
+                Close
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => setTroubleshootDialogOpen(false)}>
+              Close
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+// Troubleshoot Action Form Component
+function TroubleshootActionForm({ action, deviceSerial, onBack, onExecute, loading, result, error, showCommandsList }) {
+  const [formData, setFormData] = useState({});
+  const [listCommandsMode, setListCommandsMode] = useState(false);
+
+  // Safety check: ensure result is an object or null
+  const safeResult = result && typeof result === 'object' ? result : null;
+
+  const handleListCommands = () => {
+    setListCommandsMode(true);
+    onExecute({ listCommands: true });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onExecute(formData);
+  };
+
+  const handleReboot = () => {
+    if (window.confirm(`Are you sure you want to reboot switch ${deviceSerial}? This will cause a service interruption.`)) {
+      onExecute({});
+    }
+  };
+
+  if (action === 'reboot') {
+    return (
+      <Box>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+            Warning: This will reboot the switch
+          </Typography>
+          <Typography variant="body2">
+            Rebooting the switch will cause a temporary service interruption. All connected devices will lose connectivity.
+          </Typography>
+        </Alert>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {result && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>Reboot initiated</Typography>
+            <Typography variant="body2" component="pre" sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', maxHeight: 400, overflow: 'auto' }}>
+              {result && typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result)}
+            </Typography>
+          </Alert>
+        )}
+        <Button
+          variant="contained"
+          color="error"
+          onClick={handleReboot}
+          disabled={loading}
+          fullWidth
+          sx={{ mt: 2 }}
+        >
+          {loading ? <CircularProgress size={24} /> : 'Reboot Switch'}
+        </Button>
+      </Box>
+    );
+  }
+
+  if (action === 'locate') {
+    return (
+      <Box>
+        <Typography variant="body2" sx={{ mb: 2 }}>
+          This will flash the LEDs on the switch to help locate it physically.
+        </Typography>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {result && typeof result === 'object' && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            <Typography variant="body2" component="pre" sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', maxHeight: 400, overflow: 'auto' }}>
+              {JSON.stringify(result, null, 2)}
+            </Typography>
+          </Alert>
+        )}
+        {result && typeof result !== 'object' && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            <Typography variant="body2">{String(result)}</Typography>
+          </Alert>
+        )}
+        <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+          <Button
+            variant="contained"
+            onClick={() => onExecute({ enable: true })}
+            disabled={loading}
+            fullWidth
+          >
+            {loading ? <CircularProgress size={24} /> : 'Enable Locate'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => onExecute({ enable: false })}
+            disabled={loading}
+            fullWidth
+          >
+            {loading ? <CircularProgress size={24} /> : 'Disable Locate'}
+          </Button>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (action === 'show-command' && listCommandsMode) {
+    return (
+      <Box>
+        <Button onClick={() => setListCommandsMode(false)} sx={{ mb: 2 }}>
+          ← Back to Run Command
+        </Button>
+        {loading ? (
+          <CircularProgress />
+        ) : showCommandsList && Array.isArray(showCommandsList) && showCommandsList.length > 0 ? (
+          <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+              Available Commands:
+            </Typography>
+            <List>
+              {showCommandsList.map((cmd, idx) => (
+                <ListItem key={idx}>
+                  <CodeIcon sx={{ mr: 1, fontSize: 16 }} />
+                  <Typography variant="body2" fontFamily="monospace">
+                    {String(cmd || '')}
+                  </Typography>
+                </ListItem>
+              ))}
+            </List>
+          </Paper>
+        ) : (
+          <Alert severity="info">No commands available</Alert>
+        )}
+      </Box>
+    );
+  }
+
+  return (
+    <Box component="form" onSubmit={handleSubmit}>
+      {action === 'ping' && (
+        <>
+          <TextField
+            fullWidth
+            label="Target IP or Hostname"
+            value={formData.target || ''}
+            onChange={(e) => setFormData({ ...formData, target: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+            placeholder="8.8.8.8"
+          />
+        </>
+      )}
+
+      {action === 'traceroute' && (
+        <>
+          <TextField
+            fullWidth
+            label="Target IP or Hostname"
+            value={formData.target || ''}
+            onChange={(e) => setFormData({ ...formData, target: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+            placeholder="8.8.8.8"
+          />
+        </>
+      )}
+
+      {(action === 'poe-bounce' || action === 'port-bounce' || action === 'cable-test') && (
+        <>
+          <TextField
+            fullWidth
+            label="Port Number"
+            value={formData.port || ''}
+            onChange={(e) => setFormData({ ...formData, port: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+            placeholder="1/1/1"
+            helperText="Enter port identifier (e.g., 1/1/1)"
+          />
+        </>
+      )}
+
+      {action === 'http-test' && (
+        <>
+          <TextField
+            fullWidth
+            label="URL"
+            value={formData.url || ''}
+            onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+            placeholder="http://example.com"
+          />
+        </>
+      )}
+
+      {action === 'aaa-test' && (
+        <>
+          <TextField
+            fullWidth
+            label="Username"
+            value={formData.username || ''}
+            onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            label="Password"
+            type="password"
+            value={formData.password || ''}
+            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+          />
+        </>
+      )}
+
+      {action === 'show-command' && (
+        <>
+          <Box sx={{ mb: 2 }}>
+            <Button
+              variant="outlined"
+              onClick={handleListCommands}
+              disabled={loading}
+              sx={{ mb: 2 }}
+              startIcon={<CodeIcon />}
+            >
+              {loading && listCommandsMode ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+              List Available Commands
+            </Button>
+          </Box>
+          <TextField
+            fullWidth
+            label="Command"
+            value={formData.command || ''}
+            onChange={(e) => setFormData({ ...formData, command: e.target.value })}
+            required
+            sx={{ mb: 2 }}
+            placeholder="show version"
+            helperText="Enter show command to execute"
+          />
+        </>
+      )}
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <Typography variant="body2">{String(error || 'Unknown error occurred')}</Typography>
+        </Alert>
+      )}
+      {safeResult && (
+        <Alert 
+          severity={safeResult.status === 'FAILED' || safeResult.status === 'TIMEOUT' ? 'error' : 'success'} 
+          sx={{ mb: 2 }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+            {safeResult.status || safeResult.task_id ? `Status: ${safeResult.status || 'Unknown'}` : 'Result'}
+          </Typography>
+          
+          {/* Ping results - handle special structure */}
+          {action === 'ping' && safeResult.replies && Array.isArray(safeResult.replies) && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                Ping Results for {safeResult.destination || 'target'}
+              </Typography>
+              <Typography variant="body2" component="pre" sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace', bgcolor: 'background.paper', p: 1, borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
+                {safeResult.replies.map((reply, idx) => 
+                  `Reply ${idx + 1}: ${reply.sequenceNumber || idx + 1} - ${reply.roundTripTimeMilliseconds || 'N/A'}ms`
+                ).join('\n')}
+                {safeResult.packetLossPercent !== undefined && `\nPacket Loss: ${safeResult.packetLossPercent}%`}
+                {safeResult.averageRoundTripTimeMilliseconds !== undefined && `\nAverage RTT: ${safeResult.averageRoundTripTimeMilliseconds}ms`}
+                {safeResult.transmittedPacketsCount !== undefined && `\nTransmitted: ${safeResult.transmittedPacketsCount}`}
+                {safeResult.receivedPacketsCount !== undefined && `\nReceived: ${safeResult.receivedPacketsCount}`}
+              </Typography>
+            </Box>
+          )}
+          
+          {/* Cable test results - handle special structure */}
+          {action === 'cable-test' && safeResult && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                Cable Test Results
+                {safeResult.port && ` for Port ${safeResult.port}`}
+              </Typography>
+              <Typography variant="body2" component="pre" sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace', bgcolor: 'background.paper', p: 1, borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
+                {safeResult.cableLengthMeters !== undefined && `Cable Length: ${safeResult.cableLengthMeters} meters\n`}
+                {safeResult.cableLengthFeet !== undefined && `Cable Length: ${safeResult.cableLengthFeet} feet\n`}
+                {safeResult.pairStatus && `Pair Status: ${JSON.stringify(safeResult.pairStatus, null, 2)}\n`}
+                {safeResult.cableType && `Cable Type: ${safeResult.cableType}\n`}
+                {safeResult.wireMap && `Wire Map: ${JSON.stringify(safeResult.wireMap, null, 2)}\n`}
+                {safeResult.pairCount !== undefined && `Pair Count: ${safeResult.pairCount}\n`}
+                {safeResult.testStatus && `Test Status: ${safeResult.testStatus}\n`}
+                {safeResult.errorMessage && `Error: ${safeResult.errorMessage}\n`}
+                {(!safeResult.cableLengthMeters && !safeResult.cableLengthFeet && !safeResult.pairStatus && !safeResult.wireMap && !safeResult.testStatus) && JSON.stringify(safeResult, null, 2)}
+              </Typography>
+            </Box>
+          )}
+          
+          {/* Standard output field - show if not ping or cable-test with special display */}
+          {!((action === 'ping' && safeResult.replies) || (action === 'cable-test')) && safeResult.output !== undefined && safeResult.output !== null && (
+            <Typography 
+              variant="body2" 
+              component="pre" 
+              sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace', maxHeight: 400, overflow: 'auto', bgcolor: 'background.paper', p: 1, borderRadius: 1 }}
+            >
+              {typeof safeResult.output === 'object' ? JSON.stringify(safeResult.output, null, 2) : String(safeResult.output)}
+            </Typography>
+          )}
+          
+          {/* Result field - show if not ping or cable-test with special display */}
+          {!((action === 'ping' && safeResult.replies) || (action === 'cable-test')) && !safeResult.output && safeResult.result !== undefined && safeResult.result !== null && (
+            <Typography 
+              variant="body2" 
+              component="pre" 
+              sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace', maxHeight: 400, overflow: 'auto', bgcolor: 'background.paper', p: 1, borderRadius: 1 }}
+            >
+              {typeof safeResult.result === 'object' ? JSON.stringify(safeResult.result, null, 2) : String(safeResult.result)}
+            </Typography>
+          )}
+          
+          {/* Error field */}
+          {!safeResult.output && !safeResult.result && safeResult.error && (
+            <Typography variant="body2" sx={{ color: 'error.main' }}>
+              {String(safeResult.error)}
+            </Typography>
+          )}
+          
+          {/* Fallback: show full JSON if no specific fields found */}
+          {!safeResult.output && !safeResult.result && !safeResult.error && !(action === 'ping' && safeResult.replies) && !(action === 'cable-test') && (
+            <Typography 
+              variant="body2" 
+              component="pre" 
+              sx={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', maxHeight: 400, overflow: 'auto', bgcolor: 'background.paper', p: 1, borderRadius: 1 }}
+            >
+              {JSON.stringify(safeResult, null, 2)}
+            </Typography>
+          )}
+        </Alert>
+      )}
+      {result && !safeResult && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="body2">Received unexpected result format: {typeof result === 'object' ? JSON.stringify(result).substring(0, 100) : String(result)}</Typography>
+        </Alert>
+      )}
+
+      {action !== 'reboot' && action !== 'locate' && (
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={loading}
+          fullWidth
+          sx={{ mt: 2 }}
+        >
+          {loading ? <CircularProgress size={24} /> : 'Execute'}
+        </Button>
+      )}
     </Box>
   );
 }

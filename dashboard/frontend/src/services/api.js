@@ -76,6 +76,19 @@ apiClient.interceptors.response.use(
     if (isOptionalEndpoint && [400, 404].includes(error.response?.status)) {
       // Silently handle - these are expected for some devices
       // Don't log to console or show error
+    } else {
+      // Enhance error message with backend error details if available
+      if (error.response?.data) {
+        const data = error.response.data;
+        // If backend provides a detailed error message, use it
+        if (data.error && typeof data.error === 'string') {
+          error.message = data.error;
+        } else if (data.message && typeof data.message === 'string') {
+          error.message = data.message;
+        } else if (typeof data === 'string') {
+          error.message = data;
+        }
+      }
     }
     
     return Promise.reject(error);
@@ -222,7 +235,7 @@ export const deviceAPI = {
 };
 
 /**
- * Configuration API
+ * Configuration API (Legacy - use configAPI.* below for network-config/v1alpha1)
  */
 export const configAPI = {
   getSites: async () => {
@@ -253,6 +266,478 @@ export const configAPI = {
   getTemplates: async () => {
     const response = await apiClient.get('/templates');
     return response.data;
+  },
+
+  // ============= Network Config v1alpha1 APIs - Organized by Category =============
+
+  // Scope Management
+  scopeManagement: {
+    getSites: async (params = {}) => {
+      const response = await apiClient.get('/config/sites', { params });
+      return response.data;
+    },
+    createSite: async (siteData) => {
+      const response = await apiClient.post('/config/sites', siteData);
+      return response.data;
+    },
+    updateSite: async (siteData) => {
+      const response = await apiClient.put('/config/sites', siteData);
+      return response.data;
+    },
+    deleteSite: async (scopeId) => {
+      const response = await apiClient.delete('/config/sites', {
+        params: { 'scope-id': scopeId },
+      });
+      return response.data;
+    },
+    bulkDeleteSites: async (scopeIds) => {
+      const response = await apiClient.delete('/config/sites/bulk-delete', {
+        data: { scopeIds },
+      });
+      return response.data;
+    },
+    getSiteCollections: async (params = {}) => {
+      const response = await apiClient.get('/config/site-collections', { params });
+      return response.data;
+    },
+    createSiteCollection: async (collectionData) => {
+      const response = await apiClient.post('/config/site-collections', collectionData);
+      return response.data;
+    },
+    updateSiteCollection: async (collectionData) => {
+      const response = await apiClient.put('/config/site-collections', collectionData);
+      return response.data;
+    },
+    deleteSiteCollection: async (scopeId) => {
+      const response = await apiClient.delete('/config/site-collections', {
+        params: { 'scope-id': scopeId },
+      });
+      return response.data;
+    },
+    addSitesToCollection: async (collectionId, siteIds) => {
+      const response = await apiClient.post('/config/site-collections/add-sites', {
+        collectionId,
+        siteIds,
+      });
+      return response.data;
+    },
+    removeSitesFromCollection: async (collectionId, siteIds) => {
+      const response = await apiClient.delete('/config/site-collections/remove-sites', {
+        data: { collectionId, siteIds },
+      });
+      return response.data;
+    },
+    getDeviceGroups: async (params = {}) => {
+      const response = await apiClient.get('/config/device-groups', { params });
+      return response.data;
+    },
+    getScopeHierarchy: async (params = {}) => {
+      const response = await apiClient.get('/config/scope-hierarchy', { params });
+      return response.data;
+    },
+    getTemplates: async () => {
+      const response = await apiClient.get('/config/templates/sites');
+      return response.data;
+    },
+    downloadTemplate: async (templateId) => {
+      const response = await apiClient.get(`/config/templates/sites/${templateId}`, {
+        responseType: 'blob',
+      });
+      return response.data;
+    },
+    import: async (file, templateId, options = {}) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('template_id', templateId);
+      Object.entries(options).forEach(([key, value]) => {
+        formData.append(key, value);
+      });
+      const response = await apiClient.post('/config/sites/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return response.data;
+    },
+    export: async (format = 'csv', filters = {}) => {
+      const response = await apiClient.get('/config/sites/export', {
+        params: { format, ...filters },
+        responseType: 'blob',
+      });
+      return response.data;
+    },
+  },
+
+  // Application Experience
+  applicationExperience: {
+    getAirgroupSystem: async () => {
+      const response = await apiClient.get('/config/airgroup-system');
+      return response.data;
+    },
+    createAirgroupSystem: async (systemData) => {
+      const response = await apiClient.post('/config/airgroup-system', systemData);
+      return response.data;
+    },
+    updateAirgroupSystem: async (systemData) => {
+      const response = await apiClient.patch('/config/airgroup-system', systemData);
+      return response.data;
+    },
+    deleteAirgroupSystem: async () => {
+      const response = await apiClient.delete('/config/airgroup-system');
+      return response.data;
+    },
+    getARCProfile: async (name) => {
+      const response = await apiClient.get(`/config/app-recog-control/${name}`);
+      return response.data;
+    },
+    createARCProfile: async (name, profileData) => {
+      const response = await apiClient.post(`/config/app-recog-control/${name}`, profileData);
+      return response.data;
+    },
+    updateARCProfile: async (name, profileData) => {
+      const response = await apiClient.patch(`/config/app-recog-control/${name}`, profileData);
+      return response.data;
+    },
+    deleteARCProfile: async (name) => {
+      const response = await apiClient.delete(`/config/app-recog-control/${name}`);
+      return response.data;
+    },
+    getUCCProfile: async (name) => {
+      const response = await apiClient.get(`/config/ucc/${name}`);
+      return response.data;
+    },
+    createUCCProfile: async (name, profileData) => {
+      const response = await apiClient.post(`/config/ucc/${name}`, profileData);
+      return response.data;
+    },
+    updateUCCProfile: async (name, profileData) => {
+      const response = await apiClient.patch(`/config/ucc/${name}`, profileData);
+      return response.data;
+    },
+    deleteUCCProfile: async (name) => {
+      const response = await apiClient.delete(`/config/ucc/${name}`);
+      return response.data;
+    },
+    getAirgroupPolicies: async () => {
+      const response = await apiClient.get('/config/airgroup-policy');
+      return response.data;
+    },
+    createAirgroupPolicy: async (policyData) => {
+      const response = await apiClient.post('/config/airgroup-policy', policyData);
+      return response.data;
+    },
+    updateAirgroupPolicy: async (policyId, policyData) => {
+      const response = await apiClient.patch(`/config/airgroup-policy/${policyId}`, policyData);
+      return response.data;
+    },
+    deleteAirgroupPolicy: async (policyId) => {
+      const response = await apiClient.delete(`/config/airgroup-policy/${policyId}`);
+      return response.data;
+    },
+  },
+
+  // Central NAC
+  centralNAC: {
+    getAuthzPolicy: async () => {
+      const response = await apiClient.get('/config/cda-authz-policy');
+      return response.data;
+    },
+    createAuthzPolicy: async (policyData) => {
+      const response = await apiClient.post('/config/cda-authz-policy', policyData);
+      return response.data;
+    },
+    updateAuthzPolicy: async (policyData) => {
+      const response = await apiClient.patch('/config/cda-authz-policy', policyData);
+      return response.data;
+    },
+    deleteAuthzPolicy: async () => {
+      const response = await apiClient.delete('/config/cda-authz-policy');
+      return response.data;
+    },
+    getIdentityStore: async () => {
+      const response = await apiClient.get('/config/cda-identity-store');
+      return response.data;
+    },
+    createIdentityStore: async (storeData) => {
+      const response = await apiClient.post('/config/cda-identity-store', storeData);
+      return response.data;
+    },
+    updateIdentityStore: async (storeData) => {
+      const response = await apiClient.patch('/config/cda-identity-store', storeData);
+      return response.data;
+    },
+    deleteIdentityStore: async () => {
+      const response = await apiClient.delete('/config/cda-identity-store');
+      return response.data;
+    },
+    getPortalProfile: async (name) => {
+      const response = await apiClient.get(`/config/cda-portal-profile/${name}`);
+      return response.data;
+    },
+    createPortalProfile: async (name, profileData) => {
+      const response = await apiClient.post(`/config/cda-portal-profile/${name}`, profileData);
+      return response.data;
+    },
+    updatePortalProfile: async (name, profileData) => {
+      const response = await apiClient.patch(`/config/cda-portal-profile/${name}`, profileData);
+      return response.data;
+    },
+    deletePortalProfile: async (name) => {
+      const response = await apiClient.delete(`/config/cda-portal-profile/${name}`);
+      return response.data;
+    },
+    getAuthProfile: async () => {
+      const response = await apiClient.get('/config/cda-auth-profile');
+      return response.data;
+    },
+    createAuthProfile: async (profileData) => {
+      const response = await apiClient.post('/config/cda-auth-profile', profileData);
+      return response.data;
+    },
+    updateAuthProfile: async (profileData) => {
+      const response = await apiClient.patch('/config/cda-auth-profile', profileData);
+      return response.data;
+    },
+    deleteAuthProfile: async () => {
+      const response = await apiClient.delete('/config/cda-auth-profile');
+      return response.data;
+    },
+  },
+
+  // Central NAC Service
+  nacService: {
+    getMACRegistrations: async (params = {}) => {
+      const response = await apiClient.get('/config/nac/mac-registration', { params });
+      return response.data;
+    },
+    createMACRegistration: async (registrationData) => {
+      const response = await apiClient.post('/config/nac/mac-registration', registrationData);
+      return response.data;
+    },
+    updateMACRegistration: async (macId, registrationData) => {
+      const response = await apiClient.put(`/config/nac/mac-registration/${macId}`, registrationData);
+      return response.data;
+    },
+    deleteMACRegistration: async (macId) => {
+      const response = await apiClient.delete(`/config/nac/mac-registration/${macId}`);
+      return response.data;
+    },
+    exportMACRegistrations: async () => {
+      const response = await apiClient.get('/config/nac/mac-registration/export', {
+        responseType: 'blob',
+      });
+      return response.data;
+    },
+    importMACRegistrations: async (file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await apiClient.post('/config/nac/mac-registration/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return response.data;
+    },
+    getMPSKRegistrations: async (params = {}) => {
+      const response = await apiClient.get('/config/nac/mpsk-registration', { params });
+      return response.data;
+    },
+    createMPSKRegistration: async (registrationData) => {
+      const response = await apiClient.post('/config/nac/mpsk-registration', registrationData);
+      return response.data;
+    },
+    deleteMPSKRegistration: async (id) => {
+      const response = await apiClient.delete(`/config/nac/mpsk-registration/${id}`);
+      return response.data;
+    },
+    getVisitors: async (params = {}) => {
+      const response = await apiClient.get('/config/nac/visitor', { params });
+      return response.data;
+    },
+    createVisitor: async (visitorData) => {
+      const response = await apiClient.post('/config/nac/visitor', visitorData);
+      return response.data;
+    },
+    deleteVisitor: async (id) => {
+      const response = await apiClient.delete(`/config/nac/visitor/${id}`);
+      return response.data;
+    },
+    getJobs: async (params = {}) => {
+      const response = await apiClient.get('/config/nac/job', { params });
+      return response.data;
+    },
+    getImages: async (params = {}) => {
+      const response = await apiClient.get('/config/nac/image', { params });
+      return response.data;
+    },
+    deleteImage: async (id) => {
+      const response = await apiClient.delete(`/config/nac/image/${id}`);
+      return response.data;
+    },
+    getUserCertificates: async (params = {}) => {
+      const response = await apiClient.get('/config/nac/user-certificate', { params });
+      return response.data;
+    },
+    deleteUserCertificate: async (id) => {
+      const response = await apiClient.delete(`/config/nac/user-certificate/${id}`);
+      return response.data;
+    },
+  },
+
+  // Config Management
+  configManagement: {
+    getCheckpoints: async (params = {}) => {
+      const response = await apiClient.get('/config/checkpoint', { params });
+      return response.data;
+    },
+    createCheckpoint: async (checkpointData) => {
+      const response = await apiClient.post('/config/checkpoint', checkpointData);
+      return response.data;
+    },
+  },
+
+  // Configuration Health
+  configHealth: {
+    getDeviceHealth: async (deviceId) => {
+      const response = await apiClient.get('/config/health/device', {
+        params: { device_id: deviceId },
+      });
+      return response.data;
+    },
+    getHealthSummary: async (params = {}) => {
+      const response = await apiClient.get('/config/health/summary', { params });
+      return response.data;
+    },
+    getActiveIssues: async (serial) => {
+      const response = await apiClient.get('/config/health/active-issue', {
+        params: { serial },
+      });
+      return response.data;
+    },
+  },
+
+  // Wireless
+  wireless: {
+    getWLANs: async (params = {}) => {
+      const response = await apiClient.get('/config/wlan', { params });
+      return response.data;
+    },
+    getWLAN: async (name) => {
+      const response = await apiClient.get(`/config/wlan/${name}`);
+      return response.data;
+    },
+    createWLAN: async (name, wlanData) => {
+      const response = await apiClient.post(`/config/wlan/${name}`, wlanData);
+      return response.data;
+    },
+    updateWLAN: async (name, wlanData) => {
+      const response = await apiClient.patch(`/config/wlan/${name}`, wlanData);
+      return response.data;
+    },
+    deleteWLAN: async (name) => {
+      const response = await apiClient.delete(`/config/wlan/${name}`);
+      return response.data;
+    },
+    getRadio: async (name) => {
+      const response = await apiClient.get(`/config/radio/${name}`);
+      return response.data;
+    },
+  },
+
+  // VLANs & Networks
+  vlansNetworks: {
+    getVLANs: async (params = {}) => {
+      const response = await apiClient.get('/config/vlan', { params });
+      return response.data;
+    },
+    getVLAN: async (vlanId) => {
+      const response = await apiClient.get(`/config/vlan/${vlanId}`);
+      return response.data;
+    },
+  },
+
+  // Switch Configuration Profiles
+  switchProfiles: {
+    // Get switch profile - returns all configuration categories
+    getProfile: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/profile`);
+      return response.data;
+    },
+    // Miscellaneous
+    getMiscellaneous: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/miscellaneous`);
+      return response.data;
+    },
+    // Named Objects
+    getNamedObjects: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/named-objects`);
+      return response.data;
+    },
+    // Network Services
+    getNetworkServices: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/network-services`);
+      return response.data;
+    },
+    // Roles and Policies
+    getRolesPolicies: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/roles-policies`);
+      return response.data;
+    },
+    // Routing Overlay
+    getRoutingOverlay: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/routing-overlay`);
+      return response.data;
+    },
+    // Security
+    getSecurity: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/security`);
+      return response.data;
+    },
+    // Services
+    getServices: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/services`);
+      return response.data;
+    },
+    // System
+    getSystem: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/system`);
+      return response.data;
+    },
+    // Telemetry
+    getTelemetry: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/telemetry`);
+      return response.data;
+    },
+    // Tunnels
+    getTunnels: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/tunnels`);
+      return response.data;
+    },
+    // VLANs and Networks
+    getVLANsNetworks: async (serial) => {
+      const response = await apiClient.get(`/config/switch/${serial}/vlans-networks`);
+      return response.data;
+    },
+  },
+
+  // Wireless Configuration Profiles (for APs)
+  wirelessProfiles: {
+    // Get wireless/AP profile
+    getProfile: async (serial) => {
+      const response = await apiClient.get(`/config/wireless/${serial}/profile`);
+      return response.data;
+    },
+    // Radio configuration
+    getRadios: async (serial) => {
+      const response = await apiClient.get(`/config/wireless/${serial}/radios`);
+      return response.data;
+    },
+    // WLAN configuration
+    getWLANs: async (serial) => {
+      const response = await apiClient.get(`/config/wireless/${serial}/wlans`);
+      return response.data;
+    },
+    // System configuration
+    getSystem: async (serial) => {
+      const response = await apiClient.get(`/config/wireless/${serial}/system`);
+      return response.data;
+    },
   },
 };
 
@@ -516,9 +1001,12 @@ export const appExperienceAPI = {
  */
 export const troubleshootAPI = {
   ping: async (deviceSerial, target) => {
+    // Ping can take up to 30 seconds due to async polling, so use longer timeout
     const response = await apiClient.post('/troubleshoot/ping', {
       device_serial: deviceSerial,
       target: target,
+    }, {
+      timeout: 35000, // 35 seconds to allow for async operation polling
     });
     return response.data;
   },
@@ -586,6 +1074,110 @@ export const troubleshootAPI = {
     if (port) params.port = port;
     const response = await apiClient.get('/troubleshoot/switch-port-status', {
       params,
+    });
+    return response.data;
+  },
+
+  // CX Switch Troubleshooting Operations
+  cxPing: async (deviceSerial, target) => {
+    const response = await apiClient.post('/troubleshoot/ping', {
+      device_serial: deviceSerial,
+      target: target,
+    }, {
+      timeout: 35000,
+    });
+    return response.data;
+  },
+
+  cxTraceroute: async (deviceSerial, target) => {
+    const response = await apiClient.post('/troubleshoot/traceroute', {
+      device_serial: deviceSerial,
+      target: target,
+    }, {
+      timeout: 65000,
+    });
+    return response.data;
+  },
+
+  cxPoeBounce: async (deviceSerial, port) => {
+    const response = await apiClient.post('/troubleshoot/cx/poe-bounce', {
+      device_serial: deviceSerial,
+      port: port,
+    }, {
+      timeout: 35000,
+    });
+    return response.data;
+  },
+
+  cxPortBounce: async (deviceSerial, port) => {
+    const response = await apiClient.post('/troubleshoot/cx/port-bounce', {
+      device_serial: deviceSerial,
+      port: port,
+    }, {
+      timeout: 35000,
+    });
+    return response.data;
+  },
+
+  cxCableTest: async (deviceSerial, port) => {
+    const response = await apiClient.post('/troubleshoot/cx/cable-test', {
+      device_serial: deviceSerial,
+      port: port,
+    }, {
+      timeout: 125000,
+    });
+    return response.data;
+  },
+
+  cxHttpTest: async (deviceSerial, url) => {
+    const response = await apiClient.post('/troubleshoot/cx/http-test', {
+      device_serial: deviceSerial,
+      url: url,
+    }, {
+      timeout: 35000,
+    });
+    return response.data;
+  },
+
+  cxAaaTest: async (deviceSerial, username, password) => {
+    const response = await apiClient.post('/troubleshoot/cx/aaa-test', {
+      device_serial: deviceSerial,
+      username: username,
+      password: password,
+    }, {
+      timeout: 35000,
+    });
+    return response.data;
+  },
+
+  cxListShowCommands: async (deviceSerial) => {
+    const response = await apiClient.get('/troubleshoot/cx/show-commands', {
+      params: { device_serial: deviceSerial },
+    });
+    return response.data;
+  },
+
+  cxRunShowCommand: async (deviceSerial, command) => {
+    const response = await apiClient.post('/troubleshoot/cx/show-command', {
+      device_serial: deviceSerial,
+      command: command,
+    }, {
+      timeout: 35000,
+    });
+    return response.data;
+  },
+
+  cxLocate: async (deviceSerial, enable = true) => {
+    const response = await apiClient.post('/troubleshoot/cx/locate', {
+      device_serial: deviceSerial,
+      enable: enable,
+    });
+    return response.data;
+  },
+
+  cxReboot: async (deviceSerial) => {
+    const response = await apiClient.post('/troubleshoot/cx/reboot', {
+      device_serial: deviceSerial,
     });
     return response.data;
   },

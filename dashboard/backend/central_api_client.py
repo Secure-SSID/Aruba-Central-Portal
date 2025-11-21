@@ -158,6 +158,34 @@ class CentralAPIClient:
 
         return response.json()
 
+    def patch(
+        self,
+        endpoint: str,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Make a PATCH request to the API.
+
+        Args:
+            endpoint: API endpoint path
+            data: Request body data
+            params: Optional query parameters
+
+        Returns:
+            Response JSON data
+
+        Raises:
+            requests.HTTPError: If the request fails
+        """
+        self._ensure_valid_token()
+        url = f"{self.base_url}{endpoint}"
+        logger.debug(f"PATCH {url}")
+
+        response = self.session.patch(url, json=data, params=params)
+        response.raise_for_status()
+
+        return response.json()
+
     def delete(
         self,
         endpoint: str,

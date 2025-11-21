@@ -262,7 +262,7 @@ function LoginPage({ onLogin }) {
               Powered by HPE Aruba Networking Central APIs (New Central / GreenLake)
             </Typography>
             <Typography variant="caption" color="text.secondary" align="center" display="block" paragraph>
-              Version 1.0.0 • API v1alpha1
+              Version 2.0.0 • API v1alpha1
             </Typography>
 
             <Divider sx={{ my: 2 }} />

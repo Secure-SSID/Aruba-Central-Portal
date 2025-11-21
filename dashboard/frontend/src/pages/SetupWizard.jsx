@@ -38,6 +38,7 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
+import { DEFAULT_API_BASE_URL, API_REGIONS, GREENLAKE_API_BASE_URL } from '../config/apiEndpoints';
 
 // Use relative URL so it works with any host/port (e.g., http://your-nas-ip:1344/api)
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -52,7 +53,7 @@ function SetupWizard({ onComplete }) {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [customerId, setCustomerId] = useState('');
-  const [baseUrl, setBaseUrl] = useState('https://internal.api.central.arubanetworks.com');
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_API_BASE_URL);
   // Optional: GreenLake RBAC (HPE GreenLake Platform) configuration
   const [enableRbac, setEnableRbac] = useState(false);
   const [rbacClientId, setRbacClientId] = useState('');
@@ -60,73 +61,8 @@ function SetupWizard({ onComplete }) {
 
   const steps = ['Welcome', 'Enter Credentials', 'Verify & Save'];
 
-  const regions = [
-    {
-      name: 'Internal',
-      url: 'https://internal.api.central.arubanetworks.com',
-      description: 'Cluster: internal'
-    },
-    {
-      name: 'EU-1 (eu)',
-      url: 'https://de1.api.central.arubanetworks.com',
-      description: 'Cluster: eu'
-    },
-    {
-      name: 'EU-Central2 (eucentral2)',
-      url: 'https://de2.api.central.arubanetworks.com',
-      description: 'Cluster: eucentral2'
-    },
-    {
-      name: 'EU-Central3 (eucentral3)',
-      url: 'https://de3.api.central.arubanetworks.com',
-      description: 'Cluster: eucentral3'
-    },
-    {
-      name: 'US-1 (prod)',
-      url: 'https://us1.api.central.arubanetworks.com',
-      description: 'Cluster: prod'
-    },
-    {
-      name: 'US-2 (central-prod2)',
-      url: 'https://us2.api.central.arubanetworks.com',
-      description: 'Cluster: central-prod2'
-    },
-    {
-      name: 'US-WEST-4 (uswest4)',
-      url: 'https://us4.api.central.arubanetworks.com',
-      description: 'Cluster: uswest4'
-    },
-    {
-      name: 'US-WEST-5 (uswest5)',
-      url: 'https://us5.api.central.arubanetworks.com',
-      description: 'Cluster: uswest5'
-    },
-    {
-      name: 'US-East1 (us-east-1)',
-      url: 'https://us6.api.central.arubanetworks.com',
-      description: 'Cluster: us-east-1'
-    },
-    {
-      name: 'Canada-1 (starman)',
-      url: 'https://ca1.api.central.arubanetworks.com',
-      description: 'Cluster: starman'
-    },
-    {
-      name: 'APAC-1 (apac)',
-      url: 'https://in.api.central.arubanetworks.com',
-      description: 'Cluster: apac'
-    },
-    {
-      name: 'APAC-EAST1 (apaceast)',
-      url: 'https://jp1.api.central.arubanetworks.com',
-      description: 'Cluster: apaceast'
-    },
-    {
-      name: 'APAC-SOUTH1 (apacsouth)',
-      url: 'https://au1.api.central.arubanetworks.com',
-      description: 'Cluster: apacsouth'
-    },
-  ];
+  // Use regional endpoints from config (can be overridden via env vars)
+  const regions = API_REGIONS;
 
   const handleNext = () => {
     setActiveStep((prevStep) => prevStep + 1);
@@ -156,7 +92,7 @@ function SetupWizard({ onComplete }) {
           ? {
               client_id: rbacClientId,
               client_secret: rbacClientSecret,
-              api_base: 'https://global.api.greenlake.hpe.com',
+              api_base: GREENLAKE_API_BASE_URL,
             }
           : null,
       });
@@ -371,7 +307,7 @@ function SetupWizard({ onComplete }) {
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   Provide GreenLake Platform credentials used for RBAC, MSP tenant creation and user management.
-                  Requests will be sent to <code>https://global.api.greenlake.hpe.com</code>.
+                  Requests will be sent to <code>{GREENLAKE_API_BASE_URL}</code>.
                 </Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
                   <TextField

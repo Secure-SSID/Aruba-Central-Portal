@@ -3,7 +3,7 @@
  * Features: Nested menus, search, recent pages, favorites
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Drawer,
@@ -42,21 +42,12 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import SearchIcon from '@mui/icons-material/Search';
-import HistoryIcon from '@mui/icons-material/History';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 
 const DRAWER_WIDTH = 240;
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
-  { text: 'Devices', icon: <DevicesIcon />, path: '/devices' },
-  { text: 'Clients', icon: <GroupsIcon />, path: '/clients' },
-  { text: 'Sites', icon: <LocationOnIcon />, path: '/sites' },
-  { text: 'WLANs', icon: <WifiIcon />, path: '/wlans' },
-  { text: 'Configuration', icon: <TuneIcon />, path: '/configuration' },
-  { text: 'NAC', icon: <SecurityIcon />, path: '/nac' },
-  { text: 'Alerts', icon: <NotificationsIcon />, path: '/alerts' },
-  { text: 'Analytics', icon: <AssessmentIcon />, path: '/analytics' },
-  { text: 'Reporting', icon: <DescriptionIcon />, path: '/reporting' },
 ];
 
 const menuGroups = [
@@ -65,6 +56,34 @@ const menuGroups = [
     title: 'Main',
     icon: <DashboardIcon />,
     items: menuItems,
+  },
+  {
+    id: 'monitoring',
+    title: 'Monitoring',
+    icon: <NetworkCheckIcon />,
+    items: [
+      { text: 'Devices', icon: <DevicesIcon />, path: '/devices' },
+      { text: 'Clients', icon: <GroupsIcon />, path: '/clients' },
+      { text: 'Sites', icon: <LocationOnIcon />, path: '/sites' },
+      { text: 'WLANs', icon: <WifiIcon />, path: '/wlans' },
+      { text: 'NAC', icon: <SecurityIcon />, path: '/nac' },
+      { text: 'Alerts', icon: <NotificationsIcon />, path: '/alerts' },
+      { text: 'Analytics', icon: <AssessmentIcon />, path: '/analytics' },
+      { text: 'Reporting', icon: <DescriptionIcon />, path: '/reporting' },
+    ],
+  },
+  {
+    id: 'config',
+    title: 'Configuration',
+    icon: <TuneIcon />,
+    items: [
+      { text: 'Site Config', icon: <LocationOnIcon />, path: '/configuration/scope-management' },
+      { text: 'Application Experience', icon: <VisibilityIcon />, path: '/configuration/application-experience' },
+      { text: 'Extensions', icon: <DescriptionIcon />, path: '/configuration/extensions' },
+      { text: 'High Availability', icon: <NetworkCheckIcon />, path: '/configuration/high-availability' },
+      { text: 'Interfaces', icon: <NetworkCheckIcon />, path: '/configuration/interfaces' },
+      { text: 'Wireless', icon: <WifiIcon />, path: '/configuration/wireless' },
+    ],
   },
   {
     id: 'admin',
@@ -101,26 +120,78 @@ const menuGroups = [
 
 function Sidebar({ open, onToggle, onSearchOpen }) {
   const location = useLocation();
-  const [expandedGroups, setExpandedGroups] = useState(['main']); // keep Administration collapsed by default
+  const prevLocationRef = useRef(location.pathname + location.search);
+  const [expandedGroups, setExpandedGroups] = useState(['main', 'monitoring']); // keep Administration and Configuration collapsed by default, Monitoring expanded
+  const [clickedGroups, setClickedGroups] = useState([]); // Track which dropdown headers were clicked (for highlighting)
   const [favorites, setFavorites] = useState([]);
-  const [recentPages, setRecentPages] = useState([]);
 
-  // Load favorites and recent pages from localStorage
+  // Load favorites from localStorage
   useEffect(() => {
     const savedFavorites = JSON.parse(localStorage.getItem('navFavorites') || '[]');
-    const savedRecent = JSON.parse(localStorage.getItem('recentPages') || '[]');
     setFavorites(savedFavorites);
-    setRecentPages(savedRecent);
   }, []);
 
-  // Disable tracking of recent pages; section removed for a cleaner UI
+  // Clear dropdown highlights when route changes to a page item (not on initial load or when already on a page)
+  useEffect(() => {
+    const currentLocation = location.pathname + location.search;
+    const prevLocation = prevLocationRef.current;
+    
+    // Only clear if location actually changed (not initial render)
+    if (currentLocation !== prevLocation) {
+      // Find which group has an active item and clear only that group's highlight
+      menuGroups.forEach(group => {
+        if (group.id === 'main') return; // Skip main group
+        
+        const hasActiveItem = group.items.some(item => {
+          if (item.path.includes('?tab=')) {
+            const [pathname, search] = item.path.split('?');
+            const params = new URLSearchParams(search);
+            const tabParam = params.get('tab');
+            const currentParams = new URLSearchParams(location.search);
+            return location.pathname === pathname && currentParams.get('tab') === tabParam;
+          } else {
+            return location.pathname === item.path && !location.search;
+          }
+        });
+
+        // If this group has an active item, remove it from clicked groups
+        if (hasActiveItem) {
+          setClickedGroups((prev) => prev.filter((id) => id !== group.id));
+        }
+      });
+    }
+    
+    prevLocationRef.current = currentLocation;
+  }, [location.pathname, location.search]);
 
   const toggleGroup = (groupId) => {
-    setExpandedGroups((prev) =>
-      prev.includes(groupId)
-        ? prev.filter((id) => id !== groupId)
-        : [...prev, groupId]
-    );
+    const isCurrentlyExpanded = expandedGroups.includes(groupId);
+    
+    setExpandedGroups((prev) => {
+      if (isCurrentlyExpanded) {
+        // If closing this dropdown, just remove it
+        return prev.filter((id) => id !== groupId);
+      } else {
+        // If opening this dropdown, close all others first (except 'main')
+        return ['main', groupId];
+      }
+    });
+    
+    // Highlight the dropdown header when clicked
+    setClickedGroups((prev) => {
+      if (isCurrentlyExpanded) {
+        // If already clicked, remove highlight when collapsing
+        return prev.filter((id) => id !== groupId);
+      } else {
+        // If opening, clear other highlights and add this one
+        return [groupId];
+      }
+    });
+  };
+
+  // Clear dropdown highlight when a page item is clicked
+  const handleMenuItemClick = (groupId) => {
+    setClickedGroups((prev) => prev.filter((id) => id !== groupId));
   };
 
   const toggleFavorite = (path, e) => {
@@ -135,31 +206,39 @@ function Sidebar({ open, onToggle, onSearchOpen }) {
     });
   };
 
-  const getPageLabel = (path) => {
-    for (const group of menuGroups) {
-      const item = group.items.find((i) => i.path === path);
-      if (item) return item.text;
+  const renderMenuItem = (item, isNested = false, groupId = null) => {
+    // For Configuration items, check both pathname and search params
+    let isActive = false;
+    if (item.path.includes('?tab=')) {
+      const [pathname, search] = item.path.split('?');
+      const params = new URLSearchParams(search);
+      const tabParam = params.get('tab');
+      const currentParams = new URLSearchParams(location.search);
+      isActive = location.pathname === pathname && currentParams.get('tab') === tabParam;
+    } else {
+      // Strict path matching - Dashboard (/) only active on exact root path
+      if (item.path === '/') {
+        isActive = location.pathname === '/' && !location.search;
+      } else {
+        // For other paths, match exactly
+        isActive = location.pathname === item.path && !location.search;
+      }
     }
-    return path;
-  };
-
-  const getPageIcon = (path) => {
-    for (const group of menuGroups) {
-      const item = group.items.find((i) => i.path === path);
-      if (item) return item.icon;
-    }
-    return <DashboardIcon />;
-  };
-
-  const renderMenuItem = (item, isNested = false) => {
-    const isActive = location.pathname === item.path;
     const isFavorite = favorites.includes(item.path);
+
+    // Clear dropdown highlight when a page item is clicked
+    const handleClick = () => {
+      if (groupId) {
+        handleMenuItemClick(groupId);
+      }
+    };
 
     return (
       <ListItem key={item.path} disablePadding>
         <ListItemButton
           component={Link}
           to={item.path}
+          onClick={handleClick}
           sx={{
             mx: 1,
             mb: 0.5,
@@ -291,8 +370,6 @@ function Sidebar({ open, onToggle, onSearchOpen }) {
 
         <Divider sx={{ mx: 2, mb: 2 }} />
 
-        {/* Favorites Section removed for cleaner navigation */}
-
         {/* Main Navigation with Nested Groups */}
         <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
           <List>
@@ -302,21 +379,58 @@ function Sidebar({ open, onToggle, onSearchOpen }) {
               }
 
               const isExpanded = expandedGroups.includes(group.id);
+              const isGroupClicked = clickedGroups.includes(group.id);
+              // Check if any item in this group is currently active
+              const hasActiveItem = group.items.some(item => {
+                if (item.path.includes('?tab=')) {
+                  const [pathname, search] = item.path.split('?');
+                  const params = new URLSearchParams(search);
+                  const tabParam = params.get('tab');
+                  const currentParams = new URLSearchParams(location.search);
+                  return location.pathname === pathname && currentParams.get('tab') === tabParam;
+                } else {
+                  return location.pathname === item.path && !location.search;
+                }
+              });
+              // Highlight if clicked, but remove highlight when a page item becomes active
+              const shouldHighlight = isGroupClicked && !hasActiveItem;
 
               return (
                 <Box key={group.id}>
                   <ListItemButton
                     onClick={() => toggleGroup(group.id)}
+                    disableRipple
+                    selected={false}
                     sx={{
                       mx: 1,
                       mb: 0.5,
                       borderRadius: 1,
+                      backgroundColor: shouldHighlight ? 'primary.main' : 'transparent',
                       '&:hover': {
-                        backgroundColor: 'rgba(255, 102, 0, 0.08)',
+                        backgroundColor: shouldHighlight
+                          ? 'primary.dark'
+                          : 'rgba(255, 102, 0, 0.08)',
+                      },
+                      '&:focus': {
+                        backgroundColor: shouldHighlight ? 'primary.main' : 'transparent',
+                      },
+                      '&:active': {
+                        backgroundColor: shouldHighlight ? 'primary.dark' : 'transparent',
+                      },
+                      '&.Mui-selected': {
+                        backgroundColor: shouldHighlight ? 'primary.main' : 'transparent',
+                        '&:hover': {
+                          backgroundColor: shouldHighlight
+                            ? 'primary.dark'
+                            : 'rgba(255, 102, 0, 0.08)',
+                        },
                       },
                     }}
                   >
-                    <ListItemIcon sx={{ color: 'text.secondary', minWidth: 40 }}>
+                    <ListItemIcon sx={{ 
+                      color: shouldHighlight ? 'white' : 'text.secondary', 
+                      minWidth: 40 
+                    }}>
                       {group.icon}
                     </ListItemIcon>
                     <ListItemText
@@ -325,14 +439,19 @@ function Sidebar({ open, onToggle, onSearchOpen }) {
                         '& .MuiTypography-root': {
                           fontWeight: 600,
                           fontSize: '0.875rem',
+                          color: shouldHighlight ? 'white' : 'text.primary',
                         },
                       }}
                     />
-                    {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    {isExpanded ? (
+                      <ExpandLessIcon sx={{ color: shouldHighlight ? 'white' : 'text.secondary' }} />
+                    ) : (
+                      <ExpandMoreIcon sx={{ color: shouldHighlight ? 'white' : 'text.secondary' }} />
+                    )}
                   </ListItemButton>
                   <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                     <List component="div" disablePadding>
-                      {group.items.map((item) => renderMenuItem(item, true))}
+                      {group.items.map((item) => renderMenuItem(item, true, group.id))}
                     </List>
                   </Collapse>
                 </Box>
@@ -340,8 +459,6 @@ function Sidebar({ open, onToggle, onSearchOpen }) {
             })}
           </List>
         </Box>
-
-        {/* Recent section removed */}
 
         {/* Footer */}
         <Box sx={{ p: 2 }}>

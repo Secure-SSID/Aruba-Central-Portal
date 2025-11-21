@@ -1,6 +1,6 @@
 {
   "name": "aruba-central-dashboard",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Interactive dashboard for HPE Aruba Networking Central Configuration APIs",
   "private": true,
   "dependencies": {
@@ -18,11 +18,15 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.8"
+    "vite": "^5.0.8",
+    "vite-plugin-compression": "^0.5.1",
+    "rollup-plugin-visualizer": "^5.12.0"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:analyze": "ANALYZE=true vite build",
+    "build:prod": "vite build --mode production",
     "preview": "vite preview"
   },
   "browserslist": {

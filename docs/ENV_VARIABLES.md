@@ -15,6 +15,7 @@ These environment variables **MUST** be set for the application to work:
 
 Choose the correct base URL for your Aruba Central region:
 
+- **Internal/Testing**: `https://internal.api.central.arubanetworks.com` (for development/testing)
 - **US West**: `https://apigw-uswest4.central.arubanetworks.com`
 - **US East**: `https://apigw-prod2.central.arubanetworks.com`
 - **EU (Germany)**: `https://apigw-eucentral3.central.arubanetworks.com`
@@ -49,7 +50,9 @@ These variables are optional but may be useful in certain configurations:
 
 ```env
 # Aruba Central API Configuration
-ARUBA_BASE_URL=https://apigw-prod2.central.arubanetworks.com
+# For internal/testing use: https://internal.api.central.arubanetworks.com
+# For production use the appropriate regional URL
+ARUBA_BASE_URL=https://internal.api.central.arubanetworks.com
 ARUBA_CLIENT_ID=your_actual_client_id_here
 ARUBA_CLIENT_SECRET=your_actual_client_secret_here
 ARUBA_CUSTOMER_ID=your_actual_customer_id_here
@@ -57,6 +60,11 @@ ARUBA_CUSTOMER_ID=your_actual_customer_id_here
 # Optional: Logging
 LOG_LEVEL=INFO
 ```
+
+**⚠️ IMPORTANT:** 
+- Never commit your `.env` file to git (it's already in `.gitignore`)
+- Copy `env.template` to `.env` and fill in your actual credentials
+- The Setup Wizard can also configure these automatically
 
 ## Setting Environment Variables in Docker
 

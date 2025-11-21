@@ -31,6 +31,7 @@ import {
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { alertsAPI } from '../services/api';
+import { getErrorMessage } from '../utils/errorUtils';
 
 function AlertsPage() {
   const [loading, setLoading] = useState(true);
@@ -60,7 +61,7 @@ function AlertsPage() {
         setEvents(eventsData.value.events || eventsData.value.items || []);
       }
     } catch (err) {
-      setError(err.message || 'Failed to load alerts and events');
+      setError(getErrorMessage(err, 'Failed to load alerts and events'));
     } finally {
       setLoading(false);
     }

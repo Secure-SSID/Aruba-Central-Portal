@@ -36,6 +36,7 @@ import {
   Check as CheckIcon,
 } from '@mui/icons-material';
 import { workspaceAPI, clusterAPI } from '../services/api';
+import { DEFAULT_API_BASE_URL } from '../config/apiEndpoints';
 
 function SettingsPage() {
   const [loading, setLoading] = useState(false);
@@ -48,7 +49,7 @@ function SettingsPage() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [customerId, setCustomerId] = useState('');
-  const [baseUrl, setBaseUrl] = useState('https://apigw-uswest4.central.arubanetworks.com');
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_API_BASE_URL);
   const [showSecret, setShowSecret] = useState(false);
 
   useEffect(() => {

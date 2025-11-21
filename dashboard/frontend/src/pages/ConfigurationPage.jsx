@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -58,14 +59,27 @@ import {
   NetworkCheck as NetworkCheckIcon,
 } from '@mui/icons-material';
 import { configAPI, bulkConfigAPI, scopeAPI, appExperienceAPI, nacAPI } from '../services/api';
+import { getErrorMessage } from '../utils/errorUtils';
+import DeviceSelector from '../components/DeviceSelector';
 
 function ConfigurationPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tabValue, setTabValue] = useState(0);
+  // Get tab from URL parameter, default to 0
+  const tabFromUrl = parseInt(searchParams.get('tab') || '0', 10);
+  const [tabValue, setTabValue] = useState(tabFromUrl);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+
+  // Update tab when URL parameter changes
+  useEffect(() => {
+    const tab = parseInt(searchParams.get('tab') || '0', 10);
+    if (tab >= 0 && tab <= 8) {
+      setTabValue(tab);
+    }
+  }, [searchParams]);
 
   // Basic configuration data
   const [sites, setSites] = useState([]);
@@ -98,8 +112,44 @@ function ConfigurationPage() {
   const [radiusProfiles, setRadiusProfiles] = useState([]);
   const [onboardingRules, setOnboardingRules] = useState([]);
 
+  // Switch Configuration state
+  const [selectedSwitchSerial, setSelectedSwitchSerial] = useState('');
+  const [switchProfiles, setSwitchProfiles] = useState(null);
+  const [switchLoading, setSwitchLoading] = useState(false);
+  const [switchProfileCategories, setSwitchProfileCategories] = useState({
+    miscellaneous: null,
+    namedObjects: null,
+    networkServices: null,
+    rolesPolicies: null,
+    routingOverlay: null,
+    security: null,
+    services: null,
+    system: null,
+    telemetry: null,
+    tunnels: null,
+    vlansNetworks: null,
+  });
+
+  // Wireless Configuration state
+  const [selectedWirelessSerial, setSelectedWirelessSerial] = useState('');
+  const [wirelessProfiles, setWirelessProfiles] = useState(null);
+  const [wirelessLoading, setWirelessLoading] = useState(false);
+  const [wirelessProfileCategories, setWirelessProfileCategories] = useState({
+    radios: null,
+    wlans: null,
+    system: null,
+  });
+
   useEffect(() => {
     fetchConfigData();
+  }, []);
+
+  // Set default tab parameter if missing (only on mount)
+  useEffect(() => {
+    if (!searchParams.get('tab')) {
+      setSearchParams({ tab: '0' }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchConfigData = async () => {
@@ -108,6 +158,7 @@ function ConfigurationPage() {
       setError('');
 
       // Fetch all configuration data in parallel
+      // Use New Central Configuration API (network-config/v1alpha1) for sites
       const [
         sitesData,
         groupsData,
@@ -126,7 +177,7 @@ function ConfigurationPage() {
         radiusData,
         onboardingData,
       ] = await Promise.allSettled([
-        configAPI.getSites(),
+        configAPI.scopeManagement.getSites({ limit: 100, offset: 0 }), // Use New Central API
         configAPI.getGroups(),
         configAPI.getTemplates(),
         scopeAPI.getLabels(),
@@ -144,63 +195,155 @@ function ConfigurationPage() {
         nacAPI.getOnboardingRules(),
       ]);
 
-      // Process basic config
+      // Process basic config - New Central API returns items array directly or in response
       if (sitesData.status === 'fulfilled') {
-        setSites(sitesData.value.sites || sitesData.value.items || []);
+        const sitesValue = sitesData.value;
+        // New Central API /network-config/v1alpha1/sites returns items array
+        if (Array.isArray(sitesValue)) {
+          setSites(sitesValue);
+        } else if (sitesValue?.items) {
+          setSites(sitesValue.items);
+        } else if (sitesValue?.sites) {
+          setSites(sitesValue.sites);
+        } else if (sitesValue?.data) {
+          setSites(sitesValue.data);
+        } else {
+          setSites([]);
+        }
+      } else {
+        console.warn('Failed to fetch sites:', sitesData.reason);
+        setSites([]);
       }
+      
       if (groupsData.status === 'fulfilled') {
-        setGroups(groupsData.value.data || groupsData.value.items || []);
+        const groupsValue = groupsData.value;
+        if (Array.isArray(groupsValue)) {
+          setGroups(groupsValue);
+        } else {
+          setGroups(groupsValue?.data || groupsValue?.items || groupsValue?.groups || []);
+        }
       }
+      
       if (templatesData.status === 'fulfilled') {
-        setTemplates(templatesData.value.templates || templatesData.value.items || []);
+        const templatesValue = templatesData.value;
+        if (Array.isArray(templatesValue)) {
+          setTemplates(templatesValue);
+        } else {
+          setTemplates(templatesValue?.templates || templatesValue?.items || templatesValue?.data || []);
+        }
       }
 
       // Process scope management
       if (labelsData.status === 'fulfilled') {
-        setLabels(labelsData.value.labels || labelsData.value.items || []);
+        const labelsValue = labelsData.value;
+        if (Array.isArray(labelsValue)) {
+          setLabels(labelsValue);
+        } else {
+          setLabels(labelsValue?.labels || labelsValue?.items || labelsValue?.data || []);
+        }
       }
+      
       if (geofencesData.status === 'fulfilled') {
-        setGeofences(geofencesData.value.geofences || geofencesData.value.items || []);
+        const geofencesValue = geofencesData.value;
+        if (Array.isArray(geofencesValue)) {
+          setGeofences(geofencesValue);
+        } else {
+          setGeofences(geofencesValue?.geofences || geofencesValue?.items || geofencesValue?.data || []);
+        }
       }
+      
       if (hierarchyData.status === 'fulfilled') {
         setSiteHierarchy(hierarchyData.value);
       }
 
       // Process application experience
       if (applicationsData.status === 'fulfilled') {
-        setApplications(applicationsData.value.applications || applicationsData.value.items || []);
+        const appsValue = applicationsData.value;
+        if (Array.isArray(appsValue)) {
+          setApplications(appsValue);
+        } else {
+          setApplications(appsValue?.applications || appsValue?.items || appsValue?.data || []);
+        }
       }
+      
       if (appCategoriesData.status === 'fulfilled') {
-        setAppCategories(appCategoriesData.value.categories || appCategoriesData.value.items || []);
+        const catsValue = appCategoriesData.value;
+        if (Array.isArray(catsValue)) {
+          setAppCategories(catsValue);
+        } else {
+          setAppCategories(catsValue?.categories || catsValue?.items || catsValue?.data || []);
+        }
       }
+      
       if (qosData.status === 'fulfilled') {
-        setQosPolicies(qosData.value.policies || qosData.value.items || []);
+        const qosValue = qosData.value;
+        if (Array.isArray(qosValue)) {
+          setQosPolicies(qosValue);
+        } else {
+          setQosPolicies(qosValue?.policies || qosValue?.items || qosValue?.data || []);
+        }
       }
+      
       if (dpiData.status === 'fulfilled') {
         setDpiSettings(dpiData.value);
       }
 
       // Process NAC data
       if (nacRolesData.status === 'fulfilled') {
-        setNacUserRoles(nacRolesData.value.roles || nacRolesData.value.items || []);
+        const rolesValue = nacRolesData.value;
+        if (Array.isArray(rolesValue)) {
+          setNacUserRoles(rolesValue);
+        } else {
+          setNacUserRoles(rolesValue?.roles || rolesValue?.items || rolesValue?.data || []);
+        }
       }
+      
       if (nacProfilesData.status === 'fulfilled') {
-        setNacDeviceProfiles(nacProfilesData.value.profiles || nacProfilesData.value.items || []);
+        const profilesValue = nacProfilesData.value;
+        if (Array.isArray(profilesValue)) {
+          setNacDeviceProfiles(profilesValue);
+        } else {
+          setNacDeviceProfiles(profilesValue?.profiles || profilesValue?.items || profilesValue?.data || []);
+        }
       }
+      
       if (nacPoliciesData.status === 'fulfilled') {
-        setNacPolicies(nacPoliciesData.value.policies || nacPoliciesData.value.items || []);
+        const policiesValue = nacPoliciesData.value;
+        if (Array.isArray(policiesValue)) {
+          setNacPolicies(policiesValue);
+        } else {
+          setNacPolicies(policiesValue?.policies || policiesValue?.items || policiesValue?.data || []);
+        }
       }
+      
       if (nacCertsData.status === 'fulfilled') {
-        setNacCertificates(nacCertsData.value.certificates || nacCertsData.value.items || []);
+        const certsValue = nacCertsData.value;
+        if (Array.isArray(certsValue)) {
+          setNacCertificates(certsValue);
+        } else {
+          setNacCertificates(certsValue?.certificates || certsValue?.items || certsValue?.data || []);
+        }
       }
+      
       if (radiusData.status === 'fulfilled') {
-        setRadiusProfiles(radiusData.value.servers || radiusData.value.items || []);
+        const radiusValue = radiusData.value;
+        if (Array.isArray(radiusValue)) {
+          setRadiusProfiles(radiusValue);
+        } else {
+          setRadiusProfiles(radiusValue?.servers || radiusValue?.items || radiusValue?.data || []);
+        }
       }
+      
       if (onboardingData.status === 'fulfilled') {
-        setOnboardingRules(onboardingData.value.rules || onboardingData.value.items || []);
+        const onboardingValue = onboardingData.value;
+        if (Array.isArray(onboardingValue)) {
+          setOnboardingRules(onboardingValue);
+        } else {
+          setOnboardingRules(onboardingValue?.rules || onboardingValue?.items || onboardingValue?.data || []);
+        }
       }
     } catch (err) {
-      setError(err.message || 'Failed to load configuration data');
+      setError(getErrorMessage(err, 'Failed to load configuration data'));
     } finally {
       setLoading(false);
     }
@@ -274,7 +417,7 @@ function ConfigurationPage() {
       setBulkResults(response);
       setShowResultsDialog(true);
     } catch (err) {
-      setError(err.message || 'Bulk operation failed');
+      setError(getErrorMessage(err, 'Bulk operation failed'));
     } finally {
       setBulkProcessing(false);
     }
@@ -291,11 +434,11 @@ function ConfigurationPage() {
     let csvContent = '';
 
     if (operation === 'ap-rename') {
-      csvContent = 'serial,new_name\nCN12345678,Building-A-AP-01\nCN87654321,Building-A-AP-02';
+      csvContent = 'serial,new_name\nSERIAL_NUMBER_1,DEVICE_NAME_1\nSERIAL_NUMBER_2,DEVICE_NAME_2';
     } else if (operation === 'group-assign') {
-      csvContent = 'serial,group\nCN12345678,campus-wifi\nCN87654321,guest-wifi';
+      csvContent = 'serial,group\nSERIAL_NUMBER_1,GROUP_NAME_1\nSERIAL_NUMBER_2,GROUP_NAME_2';
     } else if (operation === 'site-assign') {
-      csvContent = 'serial,site_id\nCN12345678,YOUR_SITE_ID\nCN87654321,YOUR_SITE_ID';
+      csvContent = 'serial,site_id\nSERIAL_NUMBER_1,SITE_ID_HERE\nSERIAL_NUMBER_2,SITE_ID_HERE';
     }
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -445,9 +588,9 @@ function ConfigurationPage() {
               CSV Format for {bulkOperation}:
             </Typography>
             <Typography variant="body2" component="pre" sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-              {bulkOperation === 'ap-rename' && 'serial,new_name\nCN12345678,Building-A-AP-01'}
-              {bulkOperation === 'group-assign' && 'serial,group\nCN12345678,campus-wifi'}
-              {bulkOperation === 'site-assign' && 'serial,site_id\nCN12345678,YOUR_SITE_ID'}
+              {bulkOperation === 'ap-rename' && 'serial,new_name\nSERIAL_NUMBER_1,DEVICE_NAME_1'}
+              {bulkOperation === 'group-assign' && 'serial,group\nSERIAL_NUMBER_1,GROUP_NAME_1'}
+              {bulkOperation === 'site-assign' && 'serial,site_id\nSERIAL_NUMBER_1,SITE_ID_HERE'}
             </Typography>
           </Alert>
         )}
@@ -481,7 +624,7 @@ function ConfigurationPage() {
           <TableHead>
             <TableRow>
               <TableCell>Site Name</TableCell>
-              <TableCell>Site ID</TableCell>
+              <TableCell>Scope ID</TableCell>
               <TableCell>Address</TableCell>
               {showAdvanced && (
                 <>
@@ -489,6 +632,7 @@ function ConfigurationPage() {
                   <TableCell>State</TableCell>
                   <TableCell>Country</TableCell>
                   <TableCell>ZIP Code</TableCell>
+                  <TableCell>Device Count</TableCell>
                 </>
               )}
               <TableCell align="right">Actions</TableCell>
@@ -496,20 +640,31 @@ function ConfigurationPage() {
           </TableHead>
           <TableBody>
             {sites.map((site, index) => (
-              <TableRow key={site.site_id || index} hover>
+              <TableRow key={site.scopeId || site.site_id || site.id || index} hover>
                 <TableCell>
                   <Typography variant="body2" fontWeight={600}>
-                    {site.site_name || 'N/A'}
+                    {site.scopeName || site.site_name || site.name || 'N/A'}
                   </Typography>
                 </TableCell>
-                <TableCell>{site.site_id || 'N/A'}</TableCell>
-                <TableCell>{site.address || 'N/A'}</TableCell>
+                <TableCell>{site.scopeId || site.site_id || site.id || 'N/A'}</TableCell>
+                <TableCell>
+                  {site.address?.address || site.address || site.addressParams?.address || 'N/A'}
+                </TableCell>
                 {showAdvanced && (
                   <>
-                    <TableCell>{site.city || 'N/A'}</TableCell>
-                    <TableCell>{site.state || 'N/A'}</TableCell>
-                    <TableCell>{site.country || 'N/A'}</TableCell>
-                    <TableCell>{site.zipcode || 'N/A'}</TableCell>
+                    <TableCell>
+                      {site.address?.city || site.city || site.addressParams?.city || 'N/A'}
+                    </TableCell>
+                    <TableCell>
+                      {site.address?.state || site.state || site.addressParams?.state || 'N/A'}
+                    </TableCell>
+                    <TableCell>
+                      {site.address?.country || site.country || site.addressParams?.country || 'N/A'}
+                    </TableCell>
+                    <TableCell>
+                      {site.address?.zipcode || site.zipcode || site.addressParams?.zipcode || 'N/A'}
+                    </TableCell>
+                    <TableCell>{site.deviceCount || 0}</TableCell>
                   </>
                 )}
                 <TableCell align="right">
@@ -1340,6 +1495,469 @@ function ConfigurationPage() {
     );
   };
 
+  // Fetch switch profile data when device is selected
+  const fetchSwitchProfile = async (serial) => {
+    if (!serial) {
+      setSwitchProfiles(null);
+      setSwitchProfileCategories({
+        miscellaneous: null,
+        namedObjects: null,
+        networkServices: null,
+        rolesPolicies: null,
+        routingOverlay: null,
+        security: null,
+        services: null,
+        system: null,
+        telemetry: null,
+        tunnels: null,
+        vlansNetworks: null,
+      });
+      return;
+    }
+
+    setSwitchLoading(true);
+    setError('');
+
+    try {
+      // Fetch all switch profile categories in parallel
+      const [
+        profileData,
+        miscData,
+        namedObjectsData,
+        networkServicesData,
+        rolesPoliciesData,
+        routingOverlayData,
+        securityData,
+        servicesData,
+        systemData,
+        telemetryData,
+        tunnelsData,
+        vlansNetworksData,
+      ] = await Promise.allSettled([
+        configAPI.switchProfiles.getProfile(serial),
+        configAPI.switchProfiles.getMiscellaneous(serial),
+        configAPI.switchProfiles.getNamedObjects(serial),
+        configAPI.switchProfiles.getNetworkServices(serial),
+        configAPI.switchProfiles.getRolesPolicies(serial),
+        configAPI.switchProfiles.getRoutingOverlay(serial),
+        configAPI.switchProfiles.getSecurity(serial),
+        configAPI.switchProfiles.getServices(serial),
+        configAPI.switchProfiles.getSystem(serial),
+        configAPI.switchProfiles.getTelemetry(serial),
+        configAPI.switchProfiles.getTunnels(serial),
+        configAPI.switchProfiles.getVLANsNetworks(serial),
+      ]);
+
+      if (profileData.status === 'fulfilled') {
+        setSwitchProfiles(profileData.value);
+      }
+
+      // Process category data
+      if (miscData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, miscellaneous: miscData.value }));
+      }
+      if (namedObjectsData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, namedObjects: namedObjectsData.value }));
+      }
+      if (networkServicesData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, networkServices: networkServicesData.value }));
+      }
+      if (rolesPoliciesData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, rolesPolicies: rolesPoliciesData.value }));
+      }
+      if (routingOverlayData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, routingOverlay: routingOverlayData.value }));
+      }
+      if (securityData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, security: securityData.value }));
+      }
+      if (servicesData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, services: servicesData.value }));
+      }
+      if (systemData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, system: systemData.value }));
+      }
+      if (telemetryData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, telemetry: telemetryData.value }));
+      }
+      if (tunnelsData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, tunnels: tunnelsData.value }));
+      }
+      if (vlansNetworksData.status === 'fulfilled') {
+        setSwitchProfileCategories(prev => ({ ...prev, vlansNetworks: vlansNetworksData.value }));
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load switch profile'));
+    } finally {
+      setSwitchLoading(false);
+    }
+  };
+
+  // Fetch wireless profile data when device is selected
+  const fetchWirelessProfile = async (serial) => {
+    if (!serial) {
+      setWirelessProfiles(null);
+      setWirelessProfileCategories({
+        radios: null,
+        wlans: null,
+        system: null,
+      });
+      return;
+    }
+
+    setWirelessLoading(true);
+    setError('');
+
+    try {
+      const [profileData, radiosData, wlansData, systemData] = await Promise.allSettled([
+        configAPI.wirelessProfiles.getProfile(serial),
+        configAPI.wirelessProfiles.getRadios(serial),
+        configAPI.wirelessProfiles.getWLANs(serial),
+        configAPI.wirelessProfiles.getSystem(serial),
+      ]);
+
+      if (profileData.status === 'fulfilled') {
+        setWirelessProfiles(profileData.value);
+      }
+
+      if (radiosData.status === 'fulfilled') {
+        setWirelessProfileCategories(prev => ({ ...prev, radios: radiosData.value }));
+      }
+      if (wlansData.status === 'fulfilled') {
+        setWirelessProfileCategories(prev => ({ ...prev, wlans: wlansData.value }));
+      }
+      if (systemData.status === 'fulfilled') {
+        setWirelessProfileCategories(prev => ({ ...prev, system: systemData.value }));
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load wireless profile'));
+    } finally {
+      setWirelessLoading(false);
+    }
+  };
+
+  // Handle switch device selection
+  useEffect(() => {
+    if (tabValue === 7 && selectedSwitchSerial) {
+      fetchSwitchProfile(selectedSwitchSerial);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSwitchSerial, tabValue]);
+
+  // Handle wireless device selection
+  useEffect(() => {
+    if (tabValue === 8 && selectedWirelessSerial) {
+      fetchWirelessProfile(selectedWirelessSerial);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWirelessSerial, tabValue]);
+
+  const renderSwitchConfiguration = () => {
+    return (
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Switch Configuration Profiles
+        </Typography>
+        <Typography variant="body2" color="text.secondary" paragraph>
+          Select a switch to view and manage its configuration profiles including Miscellaneous, Named Objects, Network Services, Roles & Policies, Security, Services, System, Telemetry, Tunnels, and VLANs & Networks.
+        </Typography>
+
+        <Box sx={{ mb: 3 }}>
+          <DeviceSelector
+            value={selectedSwitchSerial}
+            onChange={(serial) => setSelectedSwitchSerial(serial)}
+            deviceType="SWITCH"
+            label="Select Switch"
+            helperText="Choose a switch to view its configuration profiles"
+            fullWidth
+          />
+        </Box>
+
+        {switchLoading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {selectedSwitchSerial && !switchLoading && (
+          <Box>
+            <Accordion defaultExpanded>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Miscellaneous</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.miscellaneous ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.miscellaneous, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No miscellaneous configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Named Objects</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.namedObjects ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.namedObjects, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No named objects available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Network Services</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.networkServices ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.networkServices, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No network services configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Roles & Policies</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.rolesPolicies ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.rolesPolicies, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No roles & policies available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Routing Overlay</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.routingOverlay ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.routingOverlay, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No routing overlay configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Security</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.security ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.security, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No security configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Services</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.services ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.services, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No services configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">System</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.system ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.system, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No system configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Telemetry</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.telemetry ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.telemetry, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No telemetry configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Tunnels</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.tunnels ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.tunnels, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No tunnels configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">VLANs & Networks</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {switchProfileCategories.vlansNetworks ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(switchProfileCategories.vlansNetworks, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No VLANs & networks configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
+  const renderWirelessConfiguration = () => {
+    return (
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Wireless Configuration Profiles
+        </Typography>
+        <Typography variant="body2" color="text.secondary" paragraph>
+          Select an Access Point to view and manage its configuration profiles including Radios, WLANs, and System settings.
+        </Typography>
+
+        <Box sx={{ mb: 3 }}>
+          <DeviceSelector
+            value={selectedWirelessSerial}
+            onChange={(serial) => setSelectedWirelessSerial(serial)}
+            deviceType="AP"
+            label="Select Access Point"
+            helperText="Choose an Access Point to view its configuration profiles"
+            fullWidth
+          />
+        </Box>
+
+        {wirelessLoading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {selectedWirelessSerial && !wirelessLoading && (
+          <Box>
+            <Accordion defaultExpanded>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">Radios</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {wirelessProfileCategories.radios ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(wirelessProfileCategories.radios, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No radio configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">WLANs</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {wirelessProfileCategories.wlans ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(wirelessProfileCategories.wlans, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No WLAN configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="h6">System</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {wirelessProfileCategories.system ? (
+                  <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {JSON.stringify(wirelessProfileCategories.system, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography color="text.secondary">No system configuration available</Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
   const renderDetailDialog = () => {
     if (!selectedItem) return null;
 
@@ -1414,7 +2032,10 @@ function ConfigurationPage() {
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs
             value={tabValue}
-            onChange={(e, newValue) => setTabValue(newValue)}
+            onChange={(e, newValue) => {
+              setTabValue(newValue);
+              setSearchParams({ tab: newValue.toString() });
+            }}
             variant="scrollable"
             scrollButtons="auto"
           >
@@ -1425,6 +2046,8 @@ function ConfigurationPage() {
             <Tab label={`Application Experience`} />
             <Tab label={`Central NAC`} />
             <Tab label={`NAC Services`} />
+            <Tab label={`Switch Configuration`} />
+            <Tab label={`Wireless Configuration`} />
           </Tabs>
         </Box>
 
@@ -1442,6 +2065,8 @@ function ConfigurationPage() {
               {tabValue === 4 && renderApplicationExperience()}
               {tabValue === 5 && renderCentralNAC()}
               {tabValue === 6 && renderNACServices()}
+              {tabValue === 7 && renderSwitchConfiguration()}
+              {tabValue === 8 && renderWirelessConfiguration()}
             </>
           )}
         </CardContent>
