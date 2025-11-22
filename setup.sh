@@ -24,12 +24,40 @@ if [ -f .env ]; then
         echo "Keeping existing .env file"
     else
         echo -e "${BLUE}ℹ${NC}  Creating .env file from template..."
-        cp .env.example .env
+        if [ -f env.template ]; then
+            cp env.template .env
+        elif [ -f .env.example ]; then
+            cp .env.example .env
+        else
+            # Create basic .env file
+            cat > .env << 'ENVEOF'
+# Aruba Central API Configuration
+# Fill in your actual credentials below
+ARUBA_BASE_URL=https://internal.api.central.arubanetworks.com
+ARUBA_CLIENT_ID=
+ARUBA_CLIENT_SECRET=
+ARUBA_CUSTOMER_ID=
+ENVEOF
+        fi
         echo -e "${GREEN}✓${NC} Created .env file"
     fi
 else
     echo -e "${BLUE}ℹ${NC}  Creating .env file from template..."
-    cp .env.example .env
+    if [ -f env.template ]; then
+        cp env.template .env
+    elif [ -f .env.example ]; then
+        cp .env.example .env
+    else
+        # Create basic .env file
+        cat > .env << 'ENVEOF'
+# Aruba Central API Configuration
+# Fill in your actual credentials below
+ARUBA_BASE_URL=https://internal.api.central.arubanetworks.com
+ARUBA_CLIENT_ID=
+ARUBA_CLIENT_SECRET=
+ARUBA_CUSTOMER_ID=
+ENVEOF
+    fi
     echo -e "${GREEN}✓${NC} Created .env file"
 fi
 

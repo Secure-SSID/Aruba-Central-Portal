@@ -28,7 +28,9 @@ import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import json from 'react-syntax-highlighter/dist/esm/languages/hljs/json';
 import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import DownloadIcon from '@mui/icons-material/Download';
-import { explorerAPI, sitesConfigAPI, monitoringAPIv2, configAPI } from '../services/api';
+import { explorerAPI, sitesConfigAPI, monitoringAPIv2, configAPI, deviceAPI } from '../services/api';
+import DeviceSelector from '../components/DeviceSelector';
+import { getErrorMessage } from '../utils/errorUtils';
 
 SyntaxHighlighter.registerLanguage('json', json);
 
@@ -48,6 +50,110 @@ const ENDPOINTS_WITH_SITE_ID = [
   '/network-monitoring/v1alpha1/alerts',
   '/network-monitoring/v1alpha1/idps/events',
 ];
+
+/**
+ * Endpoints that REQUIRE site-id parameter (backend returns 400 if missing)
+ */
+const ENDPOINTS_REQUIRING_SITE_ID = [
+  '/network-monitoring/v1alpha1/clients',
+  '/api/clients', // Backend endpoint
+];
+
+/**
+ * Check if an endpoint requires a serial parameter (in path or query)
+ * Detects patterns like /devices/{serial}, /aps/{serial}, /switches/{serial}
+ * or query parameters like ?serial=XXX
+ */
+const requiresSerial = (endpoint) => {
+  if (!endpoint) return false;
+  
+  // Parse endpoint to get base path without query params
+  const [basePath] = endpoint.trim().split('?');
+  const normalizedPath = basePath.toLowerCase().replace(/\/$/, '');
+  
+  // Patterns that indicate serial is required in path
+  const serialPathPatterns = [
+    /\/devices\/\{serial\}/i,
+    /\/device\/\{serial\}/i,
+    /\/aps\/\{serial\}/i,
+    /\/ap\/\{serial\}/i,
+    /\/switches\/\{serial\}/i,
+    /\/switch\/\{serial\}/i,
+    /\/gateways\/\{serial\}/i,
+    /\/gateway\/\{serial\}/i,
+    /\/monitoring\/aps\/\{serial\}/i,
+    /\/monitoring\/switches\/\{serial\}/i,
+    /\/monitoring\/devices\/\{serial\}/i,
+  ];
+  
+  // Check if path contains {serial} placeholder
+  if (serialPathPatterns.some(pattern => pattern.test(normalizedPath))) {
+    return true;
+  }
+  
+  // Check if path has a segment that looks like it needs serial
+  // e.g., /monitoring/aps/ABC123, /devices/XYZ789
+  const pathSegments = normalizedPath.split('/');
+  const serialIndicators = ['aps', 'ap', 'switches', 'switch', 'devices', 'device', 'gateways', 'gateway'];
+  
+  for (let i = 0; i < pathSegments.length - 1; i++) {
+    if (serialIndicators.includes(pathSegments[i])) {
+      const nextSegment = pathSegments[i + 1];
+      // If next segment exists and doesn't look like a known resource, it's likely a serial
+      if (nextSegment && !['cpu', 'memory', 'power', 'interfaces', 'ports', 'radios'].includes(nextSegment)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+};
+
+/**
+ * Extract serial from endpoint path if present
+ */
+const extractSerialFromPath = (endpoint) => {
+  if (!endpoint) return null;
+  
+  const [basePath] = endpoint.trim().split('?');
+  const pathSegments = basePath.split('/').filter(s => s);
+  
+  const serialIndicators = ['aps', 'ap', 'switches', 'switch', 'devices', 'device', 'gateways', 'gateway'];
+  
+  for (let i = 0; i < pathSegments.length - 1; i++) {
+    if (serialIndicators.includes(pathSegments[i].toLowerCase())) {
+      const nextSegment = pathSegments[i + 1];
+      // If next segment exists and doesn't look like a known resource, it's likely a serial
+      if (nextSegment && !['cpu', 'memory', 'power', 'interfaces', 'ports', 'radios', 'trends', 'usage'].includes(nextSegment.toLowerCase())) {
+        return nextSegment;
+      }
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Get device type from endpoint path (AP, SWITCH, GATEWAY)
+ */
+const getDeviceTypeFromEndpoint = (endpoint) => {
+  if (!endpoint) return null;
+  
+  const [basePath] = endpoint.trim().split('?');
+  const normalizedPath = basePath.toLowerCase();
+  
+  if (normalizedPath.includes('/ap/') || normalizedPath.includes('/aps/')) {
+    return 'AP';
+  }
+  if (normalizedPath.includes('/switch/') || normalizedPath.includes('/switches/')) {
+    return 'SWITCH';
+  }
+  if (normalizedPath.includes('/gateway/') || normalizedPath.includes('/gateways/')) {
+    return 'GATEWAY';
+  }
+  
+  return null;
+};
 
 /**
  * Check if an endpoint supports site-id parameter
@@ -88,6 +194,24 @@ const supportsSiteId = (endpoint) => {
     }
     
     return false;
+  });
+};
+
+/**
+ * Check if an endpoint REQUIRES site-id parameter
+ * Returns true for endpoints that will return 400 if site-id is missing
+ */
+const requiresSiteId = (endpoint) => {
+  if (!endpoint) return false;
+  
+  // Parse endpoint to get base path without query params
+  const [basePath] = endpoint.trim().split('?');
+  const normalizedPath = basePath.toLowerCase().replace(/\/$/, '');
+  
+  // Check against endpoints that require site-id
+  return ENDPOINTS_REQUIRING_SITE_ID.some(requiredPath => {
+    const requiredPathNormalized = requiredPath.toLowerCase();
+    return normalizedPath === requiredPathNormalized || normalizedPath.endsWith(requiredPathNormalized);
   });
 };
 
@@ -1457,166 +1581,167 @@ const COMMON_ENDPOINTS = [
     notes: 'Replace {serial} with AP serial. Body: {ssid}',
     category: 'Troubleshooting'
   },
+  // ========== CX Switches Troubleshooting ==========
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/ping',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/ping',
     method: 'POST',
-    description: 'Initiate Ping test on CX Switch',
+    description: 'Initiate a Ping test on a CX Switch',
     params: {},
-    body: { target: '8.8.8.8', count: 4 },
-    notes: 'Replace {serial} with CX switch serial. Body: {target, count}',
+    body: { destination: '8.8.8.8' },
+    notes: 'Replace {serial-number} with CX switch serial. Body: {destination}. Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxping',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/ping/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/ping/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Ping test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/traceroute',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/traceroute',
     method: 'POST',
-    description: 'Initiate Traceroute test on CX Switch',
+    description: 'Initiate a Traceroute test on a CX Switch',
     params: {},
-    body: { target: '8.8.8.8' },
-    notes: 'Replace {serial} with CX switch serial. Body: {target}',
+    body: { destination: '8.8.8.8' },
+    notes: 'Replace {serial-number} with CX switch serial. Body: {destination}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/traceroute/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/traceroute/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Traceroute test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/poe-bounce',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/poeBounce',
     method: 'POST',
-    description: 'Initiate PoE Bounce test on CX Switch',
+    description: 'Initiate a PoE Bounce test on a CX Switch',
     params: {},
     body: { port: '1/1' },
-    notes: 'Replace {serial} with CX switch serial. Body: {port}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {port}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/poe-bounce/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/poeBounce/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch PoE Bounce test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/port-bounce',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/portBounce',
     method: 'POST',
-    description: 'Initiate Port Bounce test on CX Switch',
+    description: 'Initiate a Port Bounce test on a CX Switch',
     params: {},
     body: { port: '1/1' },
-    notes: 'Replace {serial} with CX switch serial. Body: {port}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {port}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/port-bounce/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/portBounce/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Port Bounce test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/cable-test',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/cableTest',
     method: 'POST',
-    description: 'Initiate Cable Test on CX Switch',
+    description: 'Initiate a Cable Test on a CX Switch',
     params: {},
     body: { port: '1/1' },
-    notes: 'Replace {serial} with CX switch serial. Body: {port}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {port}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/cable-test/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/cableTest/async-operations/{task-id}',
     method: 'GET',
     description: 'Get CX Switch Cable Test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/http-test',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/httpTest',
     method: 'POST',
-    description: 'Initiate HTTP test on CX Switch',
+    description: 'Initiate a Http test on a CX Switch',
     params: {},
     body: { url: 'http://example.com' },
-    notes: 'Replace {serial} with CX switch serial. Body: {url}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {url}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/http-test/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/httpTest/async-operations/{task-id}',
     method: 'GET',
-    description: 'Get CX Switch HTTP test status and results',
+    description: 'Get CX Switch Http test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/aaa-test',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/aaaTest',
     method: 'POST',
-    description: 'Initiate AAA test on CX Switch',
+    description: 'Initiate a Aaa test on a CX Switch',
     params: {},
     body: { username: 'test', password: 'test' },
-    notes: 'Replace {serial} with CX switch serial. Body: {username, password}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {username, password}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/aaa-test/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/aaaTest/async-operations/{task-id}',
     method: 'GET',
-    description: 'Get CX Switch AAA test status and results',
+    description: 'Get CX Switch Aaa test status and results',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/show-commands',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/showCommand',
     method: 'GET',
     description: 'List show commands (CX - strict supported list)',
     params: {},
-    notes: 'Replace {serial} with CX switch serial',
+    notes: 'Replace {serial-number} with CX switch serial',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/show-commands',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/showCommand',
     method: 'POST',
     description: 'Run a show command (CX)',
     params: {},
     body: { command: 'show version' },
-    notes: 'Replace {serial} with CX switch serial. Body: {command}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {command}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/show-commands/{test_id}',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/showCommand/async-operations/{task-id}',
     method: 'GET',
     description: 'Get show command status/result (CX)',
     params: {},
-    notes: 'Replace {serial} and {test_id} with actual values',
+    notes: 'Replace {serial-number} and {task-id} with actual values',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/locate',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/locate',
     method: 'POST',
     description: 'Locate a CX Switch',
     params: {},
     body: { enable: true },
-    notes: 'Replace {serial} with CX switch serial. Body: {enable}',
+    notes: 'Replace {serial-number} with CX switch serial. Body: {enable}',
     category: 'Troubleshooting'
   },
   {
-    path: '/troubleshooting/v1alpha1/switches/cx/{serial}/reboot',
+    path: '/network-troubleshooting/v1alpha1/cx/{serial-number}/reboot',
     method: 'POST',
     description: 'Reboot a CX Switch',
     params: {},
     body: {},
-    notes: 'Replace {serial} with CX switch serial',
+    notes: 'Replace {serial-number} with CX switch serial',
     category: 'Troubleshooting'
   },
   {
@@ -2057,6 +2182,163 @@ function APIExplorerPage() {
   const [selectedSite, setSelectedSite] = useState('');
   const [loadingSites, setLoadingSites] = useState(false);
   const [sitesError, setSitesError] = useState('');
+  const [selectedDevice, setSelectedDevice] = useState('');
+  const [devices, setDevices] = useState([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+
+  // Fetch devices on component mount
+  useEffect(() => {
+    const loadDevices = async () => {
+      try {
+        setLoadingDevices(true);
+        console.log('🔍 Loading devices for API Explorer...');
+        
+        // Try multiple endpoints to get devices (similar to DevicesPage)
+        const [devicesData, switchesData, apsData, gatewaysData] = await Promise.allSettled([
+          deviceAPI.getAll(),
+          deviceAPI.getSwitches(),
+          deviceAPI.getAccessPoints(),
+          monitoringAPIv2.getGatewaysMonitoring(),
+        ]);
+        
+        let allDevices = [];
+        
+        // Process all devices
+        if (devicesData.status === 'fulfilled') {
+          const data = devicesData.value;
+          console.log('✅ Devices API response:', data);
+          let devicesList = [];
+          if (Array.isArray(data)) {
+            devicesList = data;
+          } else if (data && typeof data === 'object') {
+            devicesList = data.items || data.data || data.devices || [];
+          }
+          allDevices = [...allDevices, ...devicesList];
+        } else {
+          console.warn('⚠️ Devices API failed:', devicesData.reason);
+        }
+        
+        // Process switches
+        if (switchesData.status === 'fulfilled') {
+          const data = switchesData.value;
+          let switchesList = [];
+          if (Array.isArray(data)) {
+            switchesList = data;
+          } else if (data && typeof data === 'object') {
+            switchesList = data.items || data.switches || data.data || [];
+          }
+          allDevices = [...allDevices, ...switchesList];
+        } else {
+          console.warn('⚠️ Switches API failed:', switchesData.reason);
+        }
+        
+        // Process APs
+        if (apsData.status === 'fulfilled') {
+          const data = apsData.value;
+          let apsList = [];
+          if (Array.isArray(data)) {
+            apsList = data;
+          } else if (data && typeof data === 'object') {
+            apsList = data.items || data.aps || data.data || [];
+          }
+          allDevices = [...allDevices, ...apsList];
+        } else {
+          console.warn('⚠️ APs API failed:', apsData.reason);
+        }
+        
+        // Process Gateways
+        if (gatewaysData.status === 'fulfilled') {
+          const data = gatewaysData.value;
+          let gwItems = [];
+          if (Array.isArray(data)) {
+            gwItems = data;
+          } else if (data && typeof data === 'object') {
+            gwItems = data.items || data.gateways || data.data || [];
+          }
+          // Normalize gateway data to common format
+          const normalized = gwItems.map((g) => ({
+            serial: g.serialNumber || g.serial || g.id,
+            serialNumber: g.serialNumber || g.serial,
+            name: g.deviceName || g.name || g.hostname || `Gateway ${g.serialNumber || g.serial || g.id}`,
+            deviceName: g.deviceName || g.name || g.hostname,
+            type: 'GATEWAY',
+            deviceType: 'GATEWAY',
+            model: g.model || g.platformModel || g.platform || '',
+            ...g
+          }));
+          allDevices = [...allDevices, ...normalized];
+        } else {
+          console.warn('⚠️ Gateways API failed:', gatewaysData.reason);
+        }
+        
+        // Remove duplicates by serial number
+        const deviceMap = new Map();
+        allDevices.forEach(device => {
+          const serial = device.serial || device.serialNumber || device.device_id || device.id;
+          if (serial && !deviceMap.has(serial)) {
+            deviceMap.set(serial, device);
+          }
+        });
+        
+        // Normalize device data
+        const devicesList = Array.from(deviceMap.values()).map(device => {
+          const serial = device.serial || device.serialNumber || device.device_id || device.id;
+          return {
+            serial: serial,
+            serialNumber: device.serialNumber || device.serial || serial,
+            name: device.name || device.deviceName || device.device_name || device.display_name || device.hostname || `Device ${serial}`,
+            deviceName: device.deviceName || device.name || device.device_name || device.display_name,
+            type: device.device_type || device.type || device.deviceType || 'UNKNOWN',
+            deviceType: device.deviceType || device.device_type || device.type,
+            model: device.model || device.platform || device.platformModel || '',
+            ...device
+          };
+        }).filter(device => device.serial); // Only include devices with serial
+        
+        console.log(`✅ Loaded ${devicesList.length} devices for API Explorer`);
+        setDevices(devicesList);
+      } catch (err) {
+        console.error('❌ Error loading devices:', err);
+        console.error('❌ Error details:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status
+        });
+        setDevices([]);
+      } finally {
+        setLoadingDevices(false);
+      }
+    };
+    
+    loadDevices();
+  }, []);
+
+  // Sync selectedDevice when endpoint changes and contains a serial
+  useEffect(() => {
+    if (devices.length > 0 && endpoint && requiresSerial(endpoint)) {
+      const serialFromPath = extractSerialFromPath(endpoint);
+      if (serialFromPath) {
+        const matchingDevice = devices.find(d => d.serial === serialFromPath);
+        if (matchingDevice && selectedDevice !== serialFromPath) {
+          setSelectedDevice(serialFromPath);
+        } else if (!matchingDevice && selectedDevice) {
+          setSelectedDevice('');
+        }
+      } else {
+        // Check query params for serial
+        const { params } = parseEndpoint(endpoint);
+        const serialFromQuery = params.get('serial');
+        if (serialFromQuery) {
+          const matchingDevice = devices.find(d => d.serial === serialFromQuery);
+          if (matchingDevice && selectedDevice !== serialFromQuery) {
+            setSelectedDevice(serialFromQuery);
+          }
+        } else if (selectedDevice) {
+          setSelectedDevice('');
+        }
+      }
+    }
+  }, [endpoint, devices, selectedDevice]);
 
   // Fetch sites on component mount
   useEffect(() => {
@@ -2253,7 +2535,23 @@ function APIExplorerPage() {
       }
 
       // Extract query parameters from endpoint and merge with parsedParams
-      const { basePath, params: endpointParams } = parseEndpoint(endpoint);
+      let { basePath, params: endpointParams } = parseEndpoint(endpoint);
+      
+      // Replace {serial} placeholder in path with selected device serial
+      if (selectedDevice && basePath.includes('{serial}')) {
+        basePath = basePath.replace(/{serial}/g, selectedDevice);
+      } else if (requiresSerial(endpoint) && selectedDevice) {
+        // If endpoint requires serial but doesn't have {serial} placeholder,
+        // try to extract and replace the serial segment
+        const serialFromPath = extractSerialFromPath(endpoint);
+        if (serialFromPath) {
+          basePath = basePath.replace(serialFromPath, selectedDevice);
+        } else {
+          // If serial is not in path, it might be in query params - ensure it's there
+          endpointParams.set('serial', selectedDevice);
+        }
+      }
+      
       const cleanEndpoint = basePath;
       
       // Merge endpoint query params with parsedParams (endpoint params take precedence)
@@ -2280,10 +2578,26 @@ function APIExplorerPage() {
           parsedParams['site-id'] = siteId;
         }
       }
+      
+      // Ensure serial is included if selected and required (for query params)
+      if (selectedDevice && requiresSerial(endpoint) && !parsedParams['serial']) {
+        parsedParams['serial'] = selectedDevice;
+      }
 
-      if (body.trim() && (method === 'POST' || method === 'PUT')) {
+      if (body.trim() && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
         try {
-          parsedBody = JSON.parse(body);
+          // If body contains {serial} placeholder, replace it
+          if (selectedDevice && body.includes('{serial}')) {
+            parsedBody = JSON.parse(body.replace(/{serial}/g, selectedDevice));
+          } else if (selectedDevice && requiresSerial(endpoint)) {
+            // If serial is required but not in body, try to add it
+            parsedBody = JSON.parse(body);
+            if (!parsedBody.device_serial && !parsedBody.serial) {
+              parsedBody.device_serial = selectedDevice;
+            }
+          } else {
+            parsedBody = JSON.parse(body);
+          }
         } catch (e) {
           throw new Error('Invalid JSON in request body');
         }
@@ -2299,7 +2613,7 @@ function APIExplorerPage() {
 
       setResponse(result);
     } catch (err) {
-      setError(err.message || 'Request failed');
+      setError(getErrorMessage(err, 'Request failed'));
     } finally {
       setLoading(false);
     }
@@ -2699,6 +3013,27 @@ function APIExplorerPage() {
                   setParams('');
                 }
                 
+                // Extract serial from path or query parameters if present
+                if (requiresSerial(newEndpoint)) {
+                  const serialFromPath = extractSerialFromPath(newEndpoint);
+                  const serialFromQuery = endpointParams.get('serial');
+                  const foundSerial = serialFromPath || serialFromQuery;
+                  
+                  if (foundSerial) {
+                    const matchingDevice = devices.find(d => d.serial === foundSerial);
+                    if (matchingDevice && selectedDevice !== foundSerial) {
+                      setSelectedDevice(foundSerial);
+                    } else if (!matchingDevice && selectedDevice) {
+                      setSelectedDevice('');
+                    }
+                  } else if (selectedDevice) {
+                    setSelectedDevice('');
+                  }
+                } else if (selectedDevice) {
+                  // Endpoint doesn't require serial, clear selection
+                  setSelectedDevice('');
+                }
+                
                 // Extract site-id from query parameters if present
                 if (supportsSiteId(newEndpoint)) {
                   const siteIdFromQuery = endpointParams.get('site-id');
@@ -2734,18 +3069,85 @@ function APIExplorerPage() {
             />
           </Box>
 
+          {/* Device Selector */}
+          {requiresSerial(endpoint) && (
+            <Box sx={{ mb: 3 }}>
+              <DeviceSelector
+                value={selectedDevice}
+                onChange={(serial) => {
+                  setSelectedDevice(serial);
+                  
+                  // Update endpoint to replace {serial} placeholder or update path
+                  if (serial && endpoint) {
+                    let updatedEndpoint = endpoint;
+                    
+                    // Replace {serial} placeholder
+                    if (endpoint.includes('{serial}')) {
+                      updatedEndpoint = endpoint.replace(/{serial}/g, serial);
+                    } else {
+                      // Try to replace serial in path
+                      const serialFromPath = extractSerialFromPath(endpoint);
+                      if (serialFromPath) {
+                        updatedEndpoint = endpoint.replace(serialFromPath, serial);
+                      } else {
+                        // Add serial as query parameter if not in path
+                        const { basePath, params } = parseEndpoint(endpoint);
+                        params.set('serial', serial);
+                        updatedEndpoint = buildEndpoint(basePath, Object.fromEntries(params));
+                      }
+                    }
+                    
+                    setEndpoint(updatedEndpoint);
+                  } else if (!serial && endpoint) {
+                    // Remove serial from endpoint and restore {serial} placeholder if needed
+                    const { basePath, params } = parseEndpoint(endpoint);
+                    params.delete('serial');
+                    
+                    // Try to restore {serial} placeholder in path
+                    const deviceType = getDeviceTypeFromEndpoint(endpoint);
+                    if (deviceType) {
+                      const typeLower = deviceType.toLowerCase();
+                      // Check if path has a serial segment that should be replaced with {serial}
+                      const pathSegments = basePath.split('/');
+                      const serialIndicators = ['aps', 'ap', 'switches', 'switch', 'devices', 'device', 'gateways', 'gateway'];
+                      
+                      for (let i = 0; i < pathSegments.length - 1; i++) {
+                        if (serialIndicators.includes(pathSegments[i].toLowerCase())) {
+                          const nextSegment = pathSegments[i + 1];
+                          if (nextSegment && !['cpu', 'memory', 'power', 'interfaces', 'ports', 'radios', 'trends', 'usage'].includes(nextSegment.toLowerCase())) {
+                            pathSegments[i + 1] = '{serial}';
+                            updatedEndpoint = buildEndpoint(pathSegments.join('/'), Object.fromEntries(params));
+                            break;
+                          }
+                        }
+                      }
+                    } else {
+                      updatedEndpoint = buildEndpoint(basePath, Object.fromEntries(params));
+                    }
+                    setEndpoint(updatedEndpoint);
+                  }
+                }}
+                required={requiresSerial(endpoint)}
+                label="Device"
+                helperText="Select a device. The device name is shown but the serial number will be used in the API call."
+                deviceType={getDeviceTypeFromEndpoint(endpoint)}
+              />
+            </Box>
+          )}
+
           {/* Site Selector */}
           {supportsSiteId(endpoint) && (
             <Box sx={{ mb: 3 }}>
               <Typography variant="body2" sx={{ mb: 1, color: 'text.secondary' }}>
-                Site (Optional)
+                Site {requiresSiteId(endpoint) ? '(Required)' : '(Optional)'}
               </Typography>
               {sitesError && (
                 <Alert severity="warning" sx={{ mb: 1 }}>
                   {sitesError}
                 </Alert>
               )}
-              <FormControl fullWidth>
+              <FormControl fullWidth required={requiresSiteId(endpoint)} error={requiresSiteId(endpoint) && !selectedSite}>
+                <InputLabel>Site {requiresSiteId(endpoint) ? '(Required)' : '(Optional)'}</InputLabel>
                 <Select
                   value={selectedSite || ''}
                   onChange={(e) => {
@@ -2755,11 +3157,12 @@ function APIExplorerPage() {
                     // Update endpoint to add/remove site-id query parameter
                     if (newSelectedSite && supportsSiteId(endpoint)) {
                       const { basePath, params } = parseEndpoint(endpoint);
-                      // Get the site ID
+                      // Get the site ID (scope-id and site-id should be the same)
                       const site = sites.find(s => 
                         (s.scopeId || s.id || s.siteId || s.site_id) === newSelectedSite
                       );
                       if (site) {
+                        // Use scopeId as site-id (they should be the same value)
                         const siteId = String(site.scopeId || site.id || site.siteId || site.site_id);
                         params.set('site-id', siteId);
                         const queryParams = Object.fromEntries(params);
@@ -2775,6 +3178,7 @@ function APIExplorerPage() {
                   }}
                   disabled={loadingSites || sites.length === 0}
                   displayEmpty
+                  label={`Site ${requiresSiteId(endpoint) ? '(Required)' : '(Optional)'}`}
                   sx={{
                     '& .MuiSelect-select': {
                       color: selectedSite ? 'inherit' : 'rgba(255, 255, 255, 0.5)',
@@ -2782,7 +3186,7 @@ function APIExplorerPage() {
                   }}
                   renderValue={(value) => {
                     if (!value || value === '') {
-                      return 'Select a site';
+                      return requiresSiteId(endpoint) ? 'Select a site (required)' : 'Select a site (optional)';
                     }
                     const site = sites.find(s => 
                       (s.scopeId || s.id || s.siteId || s.site_id) === value
@@ -2790,6 +3194,11 @@ function APIExplorerPage() {
                     return site ? (site.name || site.siteName || site.displayName || `Site ${value}`) : value;
                   }}
                 >
+                  {!requiresSiteId(endpoint) && (
+                    <MenuItem value="">
+                      <em>None (no site filter)</em>
+                    </MenuItem>
+                  )}
                   {loadingSites ? (
                     <MenuItem value="" disabled>
                       <CircularProgress size={16} sx={{ mr: 1 }} />
@@ -2814,16 +3223,27 @@ function APIExplorerPage() {
                       return (
                         <MenuItem key={siteId} value={siteId}>
                           {siteName}
+                          <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                            ({siteId})
+                          </Typography>
                         </MenuItem>
                       );
                     })
                   )}
                 </Select>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {selectedSite 
-                    ? `Site ID is added as a query parameter (?site-id=${selectedSite}). Remove it from the endpoint to unselect.`
-                    : 'Optional: Select a site to add ?site-id=XXX as a query parameter.'}
-                </Typography>
+                {requiresSiteId(endpoint) && !selectedSite ? (
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                    Site selection is required for this endpoint
+                  </Typography>
+                ) : (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
+                    {selectedSite 
+                      ? `Site ID is added as a query parameter (?site-id=${selectedSite}). scope-id and site-id use the same value.`
+                      : requiresSiteId(endpoint)
+                      ? 'Required: Select a site to add ?site-id=XXX as a query parameter.'
+                      : 'Optional: Select a site to add ?site-id=XXX as a query parameter.'}
+                  </Typography>
+                )}
               </FormControl>
             </Box>
           )}

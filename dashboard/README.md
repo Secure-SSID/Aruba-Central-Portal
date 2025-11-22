@@ -2,7 +2,7 @@
 
 An interactive web dashboard for HPE Aruba Networking Central Configuration APIs. This application provides a modern, secure, and user-friendly interface to manage and monitor your Aruba Central network infrastructure.
 
-![Dashboard Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Dashboard Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![Python](https://img.shields.io/badge/python-3.9+-green)
 ![Node](https://img.shields.io/badge/node-18+-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -497,5 +497,5 @@ For issues related to:
 
 ---
 
-**Version**: 1.0.0
+**Version**: 2.0.0
 **Last Updated**: November 2025

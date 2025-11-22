@@ -1,0 +1,73 @@
+# Git Attributes - Prevent accidental commits of sensitive data
+
+# Environment files - never commit
+.env* text eol=lf
+*.env text eol=lf
+config.local.yaml text eol=lf
+
+# Credential and secret files
+*.key binary
+*.pem binary
+*.crt binary
+*.p12 binary
+*.pfx binary
+credentials.json text eol=lf
+secrets.json text eol=lf
+*.token_cache.json text eol=lf
+
+# Session and data files
+sessions.json text eol=lf
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# CSV exports (may contain sensitive data)
+*.csv text eol=lf
+*.xlsx binary
+
+# Log files (may contain sensitive data)
+*.log text eol=lf
+
+# Python cache
+__pycache__/ -text
+*.py[cod] binary
+
+# Node modules
+node_modules/ -text
+
+# Build artifacts
+build/ -text
+dist/ -text
+*.egg-info/ -text
+
+# OS files
+.DS_Store binary
+Thumbs.db binary
+
+# Text files should use LF line endings
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text eol=lf
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+

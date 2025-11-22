@@ -7,13 +7,17 @@ Serves as an API proxy to securely handle authentication and API calls
 import sys
 import os
 import json
+import re
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from flask_compress import Compress
 import logging
 from functools import wraps
 import secrets
 import time
+import hashlib
+from datetime import datetime, timedelta
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -31,7 +35,54 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='../frontend/build', static_url_path='')
-CORS(app, origins=['http://localhost:3000', 'http://localhost:1344'])
+CORS(app, origins=['http://localhost:1344', 'http://localhost:5000'])
+
+# Enable compression (gzip and brotli)
+Compress(app)
+
+# Cache control helper functions
+def add_cache_headers(response, cache_max_age=3600, is_static=False):
+    """Add cache-control headers to response."""
+    if is_static:
+        # Static assets: long-term caching (1 year) with hash-based filenames
+        response.cache_control.max_age = 31536000  # 1 year
+        response.cache_control.public = True
+        response.cache_control.immutable = True
+    else:
+        # API responses: shorter caching (default 1 hour)
+        response.cache_control.max_age = cache_max_age
+        response.cache_control.private = True
+        response.cache_control.must_revalidate = True
+    return response
+
+def add_etag_header(response, content):
+    """Add ETag header based on content hash."""
+    if isinstance(content, str):
+        content_bytes = content.encode('utf-8')
+    else:
+        content_bytes = content
+    etag = hashlib.md5(content_bytes).hexdigest()
+    response.set_etag(etag)
+    return response
+
+@app.after_request
+def set_cache_headers(response):
+    """Set appropriate cache headers for all responses."""
+    # Don't cache API responses by default (they're dynamic)
+    if request.path.startswith('/api/'):
+        # API responses: no cache or short cache
+        response.cache_control.no_cache = True
+        response.cache_control.no_store = True
+        response.cache_control.must_revalidate = True
+    elif request.path.startswith('/static/') or request.path.endswith(('.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2', '.ttf', '.ico')):
+        # Static assets: long-term caching
+        response = add_cache_headers(response, is_static=True)
+    elif request.path == '/' or request.path.endswith('.html'):
+        # HTML files: no cache (they may change)
+        response.cache_control.no_cache = True
+        response.cache_control.must_revalidate = True
+    
+    return response
 
 # Session management (in production, use Redis or database)
 active_sessions = {}
@@ -692,7 +743,7 @@ def create_wlan():
     """Create a new WLAN."""
     try:
         data = request.get_json()
-        response = aruba_client.post('/configuration/v1/wlan', json=data)
+        response = aruba_client.post('/configuration/v1/wlan', data=data)
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error creating WLAN: {e}")
@@ -1333,7 +1384,12 @@ def get_app_visibility():
 @app.route('/api/troubleshoot/ping', methods=['POST'])
 @require_session
 def troubleshoot_ping():
-    """Execute ping test from device."""
+    """Execute ping test from device using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/ping
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/ping
+    """
+    
     try:
         data = request.get_json()
         device_serial = data.get('device_serial')
@@ -1342,13 +1398,76 @@ def troubleshoot_ping():
         if not device_serial or not target:
             return jsonify({"error": "device_serial and target are required"}), 400
 
-        # Use tools API for ping
         try:
+            # Step 1: Initiate ping request
             response = aruba_client.post(
-                f'/device-management/v1/device/{device_serial}/action/ping',
-                json={"host": target}
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/ping',
+                data={"destination": target}
             )
-            return jsonify(response)
+            
+            # Step 2: Extract task ID from location URL
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                # If no location, check if response already contains the result
+                if response.get('status') == 'COMPLETED' and 'output' in response:
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response", "response": response}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Step 3: Poll async operation until completion
+            max_attempts = 30  # Maximum polling attempts
+            poll_interval = 1  # Wait 1 second between polls
+            max_wait_time = 30  # Maximum total wait time (30 seconds to match frontend timeout)
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                # Check if we've exceeded max wait time
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "Ping operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                # Poll the async operation
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/ping/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    # Success! Return the completed result
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    # Operation failed
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"Ping operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id,
+                        "response": async_response
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    # Still processing, wait and poll again
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    # Unknown status
+                    logger.warning(f"Unknown ping status: {status}, response: {async_response}")
+                    time.sleep(poll_interval)
+                    continue
+            
+            # If we've exhausted all attempts
+            return jsonify({
+                "error": "Ping operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id,
+                "last_response": async_response if 'async_response' in locals() else None
+            }), 504
+            
         except Exception as terr:
             if '400' in str(terr) or '404' in str(terr) or 'Not Found' in str(terr) or 'Bad Request' in str(terr):
                 return jsonify({"status": "unavailable", "result": None})
@@ -1361,7 +1480,11 @@ def troubleshoot_ping():
 @app.route('/api/troubleshoot/traceroute', methods=['POST'])
 @require_session
 def troubleshoot_traceroute():
-    """Execute traceroute test from device."""
+    """Execute traceroute test from CX switch using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxtraceroute
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/traceroute
+    """
     try:
         data = request.get_json()
         device_serial = data.get('device_serial')
@@ -1371,17 +1494,909 @@ def troubleshoot_traceroute():
             return jsonify({"error": "device_serial and target are required"}), 400
 
         try:
+            # Step 1: Initiate traceroute request
             response = aruba_client.post(
-                f'/device-management/v1/device/{device_serial}/action/traceroute',
-                json={"host": target}
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/traceroute',
+                data={"destination": target}
             )
-            return jsonify(response)
+            
+            # Step 2: Extract task ID from location URL
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED' and 'output' in response:
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response", "response": response}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Step 3: Poll async operation until completion
+            max_attempts = 60  # Maximum polling attempts
+            poll_interval = 1  # Wait 1 second between polls
+            max_wait_time = 60  # Maximum total wait time (60 seconds)
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "Traceroute operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/traceroute/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"Traceroute operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id,
+                        "response": async_response
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    logger.warning(f"Unknown traceroute status: {status}, response: {async_response}")
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "Traceroute operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
         except Exception as terr:
             if '400' in str(terr) or '404' in str(terr) or 'Not Found' in str(terr) or 'Bad Request' in str(terr):
                 return jsonify({"status": "unavailable", "result": None})
             raise terr
     except Exception as e:
         logger.error(f"Traceroute troubleshooting error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/poe-bounce', methods=['POST'])
+@require_session
+def troubleshoot_cx_poe_bounce():
+    """Execute POE bounce test on CX switch using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxpoebounce
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/poeBounce
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        port = data.get('port')
+
+        if not device_serial or not port:
+            return jsonify({"error": "device_serial and port are required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/poeBounce',
+                data={"port": port}
+            )
+            
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED':
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response"}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Poll for completion
+            max_attempts = 30
+            poll_interval = 1
+            max_wait_time = 30
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "POE bounce operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/poeBounce/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"POE bounce operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "POE bounce operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
+        except Exception as terr:
+            # Properly handle HTTP errors from requests library
+            import requests
+            if isinstance(terr, requests.HTTPError):
+                status_code = terr.response.status_code if hasattr(terr, 'response') and terr.response else None
+                error_text = terr.response.text if hasattr(terr, 'response') and terr.response else str(terr)
+                
+                logger.error(
+                    f"POE bounce API error: HTTP {status_code} - {error_text[:500] if error_text else 'Unknown error'}"
+                )
+                
+                # Return more informative error message
+                if status_code in (400, 404):
+                    error_msg = error_text if error_text and len(error_text) < 200 else "POE bounce operation is not available for this device or port"
+                    return jsonify({
+                        "status": "unavailable",
+                        "result": None,
+                        "error": error_msg,
+                        "status_code": status_code
+                    }), status_code
+                else:
+                    # For other HTTP errors, return the actual error
+                    return jsonify({
+                        "status": "error",
+                        "error": error_text[:200] if error_text else str(terr),
+                        "status_code": status_code
+                    }), status_code if status_code else 500
+            elif '400' in str(terr) or '404' in str(terr):
+                # Fallback for string-based checks
+                logger.warning(f"POE bounce error (string check): {terr}")
+                return jsonify({
+                    "status": "unavailable",
+                    "result": None,
+                    "error": "POE bounce operation is not available. This may indicate the device or port does not support this operation."
+                }), 404
+            raise terr
+    except Exception as e:
+        logger.error(f"POE bounce troubleshooting error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/port-bounce', methods=['POST'])
+@require_session
+def troubleshoot_cx_port_bounce():
+    """Execute port bounce test on switch using async API.
+    
+    Tries CX endpoint first, falls back to AOS-S endpoint if CX fails.
+    
+    CX Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxportbounce
+    CX Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/port-bounce
+    AOS-S Endpoint: /troubleshooting/v1alpha1/switches/{serial}/port-bounce
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        port = data.get('port')
+
+        if not device_serial or not port:
+            return jsonify({"error": "device_serial and port are required"}), 400
+
+        # Try CX endpoint first
+        cx_failed = False
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/portBounce',
+                data={"ports": [port]}  # API expects array of ports
+            )
+            
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED':
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response"}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Poll for completion
+            max_attempts = 60  # Increased to allow up to 60 seconds
+            poll_interval = 1
+            max_wait_time = 60  # Increased timeout to 60 seconds
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "Port bounce operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/portBounce/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    # "Timed Out" in failReason is a valid completion when port has nothing connected
+                    fail_reason = async_response.get('failReason', '')
+                    
+                    # Check port status after bounce completes (wait 2 seconds for port to stabilize)
+                    port_status = None
+                    try:
+                        time.sleep(2)  # Wait for port to stabilize after bounce
+                        # Try to get port status
+                        try:
+                            # Parse port identifier (e.g., "1/1/13" -> need to URL encode)
+                            import urllib.parse
+                            encoded_port = urllib.parse.quote(port, safe='')
+                            port_status_response = aruba_client.get(
+                                f'/network-monitoring/v1alpha1/switch/{device_serial}/interfaces/{encoded_port}'
+                            )
+                            if port_status_response:
+                                port_status = {
+                                    "operStatus": port_status_response.get('operStatus', 'Unknown'),
+                                    "adminStatus": port_status_response.get('adminStatus', 'Unknown'),
+                                    "id": port_status_response.get('id', port),
+                                    "name": port_status_response.get('name', port),
+                                }
+                        except Exception as port_check_err:
+                            logger.warning(f"Could not check port status after bounce: {port_check_err}")
+                            port_status = {"error": "Could not retrieve port status", "note": "Port may still be recovering"}
+                    
+                    except Exception as e:
+                        logger.warning(f"Error checking port status: {e}")
+                    
+                    result = {**async_response}
+                    if port_status:
+                        result["portStatus"] = port_status
+                    
+                    if fail_reason == 'Timed Out':
+                        # This is expected when port has no device connected - return as success
+                        result["message"] = "Port bounce completed. Note: Port may have no device connected (Timed Out)."
+                    else:
+                        result["message"] = "Port bounce completed successfully."
+                        if port_status and port_status.get('operStatus') == 'Down':
+                            result["warning"] = "Port is currently Down. It may take a few seconds to come back up if a device is connected."
+                    
+                    return jsonify(result)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    # "Timed Out" is not a failure - it's expected when port has nothing connected
+                    if fail_reason == 'Timed Out':
+                        # Check port status
+                        port_status = None
+                        try:
+                            time.sleep(2)
+                            try:
+                                import urllib.parse
+                                encoded_port = urllib.parse.quote(port, safe='')
+                                port_status_response = aruba_client.get(
+                                    f'/network-monitoring/v1alpha1/switch/{device_serial}/interfaces/{encoded_port}'
+                                )
+                                if port_status_response:
+                                    port_status = {
+                                        "operStatus": port_status_response.get('operStatus', 'Unknown'),
+                                        "adminStatus": port_status_response.get('adminStatus', 'Unknown'),
+                                        "id": port_status_response.get('id', port),
+                                        "name": port_status_response.get('name', port),
+                                    }
+                            except Exception as port_check_err:
+                                logger.warning(f"Could not check port status after bounce: {port_check_err}")
+                        except Exception as e:
+                            logger.warning(f"Error checking port status: {e}")
+                        
+                        result = {
+                            **async_response,
+                            "status": "COMPLETED",
+                            "message": "Port bounce completed. Note: Port may have no device connected (Timed Out)."
+                        }
+                        if port_status:
+                            result["portStatus"] = port_status
+                        return jsonify(result)
+                    
+                    # For actual failures, still try to check port status
+                    port_status = None
+                    try:
+                        time.sleep(2)
+                        try:
+                            import urllib.parse
+                            encoded_port = urllib.parse.quote(port, safe='')
+                            port_status_response = aruba_client.get(
+                                f'/network-monitoring/v1alpha1/switch/{device_serial}/interfaces/{encoded_port}'
+                            )
+                            if port_status_response:
+                                port_status = {
+                                    "operStatus": port_status_response.get('operStatus', 'Unknown'),
+                                    "adminStatus": port_status_response.get('adminStatus', 'Unknown'),
+                                    "id": port_status_response.get('id', port),
+                                    "name": port_status_response.get('name', port),
+                                }
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    
+                    error_response = {
+                        "error": f"Port bounce operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id
+                    }
+                    if port_status:
+                        error_response["portStatus"] = port_status
+                    return jsonify(error_response), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "Port bounce operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
+        except Exception as terr:
+            # Properly handle HTTP errors from requests library
+            import requests
+            if isinstance(terr, requests.HTTPError):
+                status_code = terr.response.status_code if hasattr(terr, 'response') and terr.response else None
+                error_text = terr.response.text if hasattr(terr, 'response') and terr.response else str(terr)
+                
+                # If CX endpoint fails with 404, try AOS-S switch endpoint
+                if status_code == 404:
+                    logger.info(f"CX port bounce endpoint not available for {device_serial}, trying AOS-S endpoint")
+                    try:
+                        # Try AOS-S switch endpoint
+                        response = aruba_client.post(
+                            f'/troubleshooting/v1alpha1/switches/{device_serial}/port-bounce',
+                            data={"port": port}
+                        )
+                        
+                        # AOS-S endpoint returns test_id instead of location
+                        test_id = response.get('test_id')
+                        if not test_id:
+                            return jsonify({"error": "Could not extract test ID from AOS-S response"}), 500
+                        
+                        # Poll for completion with AOS-S endpoint
+                        max_attempts = 30
+                        poll_interval = 1
+                        max_wait_time = 30
+                        
+                        start_time = time.time()
+                        for attempt in range(max_attempts):
+                            if time.time() - start_time > max_wait_time:
+                                return jsonify({
+                                    "error": "Port bounce operation timed out",
+                                    "status": "TIMEOUT",
+                                    "test_id": test_id
+                                }), 504
+                            
+                            async_response = aruba_client.get(
+                                f'/troubleshooting/v1alpha1/switches/{device_serial}/port-bounce/{test_id}'
+                            )
+                            
+                            status = async_response.get('status', 'UNKNOWN')
+                            
+                            if status in ['COMPLETED', 'SUCCESS']:
+                                return jsonify(async_response)
+                            elif status == 'FAILED':
+                                fail_reason = async_response.get('reason', 'Unknown error')
+                                return jsonify({
+                                    "error": f"Port bounce operation failed: {fail_reason}",
+                                    "status": "FAILED",
+                                    "test_id": test_id
+                                }), 500
+                            elif status in ['INITIATED', 'IN_PROGRESS', 'RUNNING']:
+                                time.sleep(poll_interval)
+                                continue
+                            else:
+                                time.sleep(poll_interval)
+                                continue
+                        
+                        return jsonify({
+                            "error": "Port bounce operation did not complete within expected time",
+                            "status": "TIMEOUT",
+                            "test_id": test_id
+                        }), 504
+                        
+                    except Exception as aos_err:
+                        logger.error(f"AOS-S port bounce also failed: {aos_err}")
+                        # Both endpoints failed, return informative error
+                        return jsonify({
+                            "status": "unavailable",
+                            "result": None,
+                            "error": "Port bounce operation is not available for this device. Neither CX nor AOS-S endpoints are supported.",
+                            "cx_error": error_text[:100] if error_text else str(terr),
+                            "aos_error": str(aos_err)[:100]
+                        }), 404
+                
+                # For non-404 errors, return informative error message
+                logger.error(
+                    f"Port bounce API error: HTTP {status_code} - {error_text[:500] if error_text else 'Unknown error'}"
+                )
+                
+                if status_code == 400:
+                    error_msg = error_text if error_text and len(error_text) < 200 else "Port bounce operation is not available for this device or port"
+                    return jsonify({
+                        "status": "unavailable",
+                        "result": None,
+                        "error": error_msg,
+                        "status_code": status_code
+                    }), status_code
+                else:
+                    # For other HTTP errors, return the actual error
+                    return jsonify({
+                        "status": "error",
+                        "error": error_text[:200] if error_text else str(terr),
+                        "status_code": status_code
+                    }), status_code if status_code else 500
+            elif '400' in str(terr) or '404' in str(terr):
+                # Fallback for string-based checks
+                logger.warning(f"Port bounce error (string check): {terr}")
+                return jsonify({
+                    "status": "unavailable",
+                    "result": None,
+                    "error": "Port bounce operation is not available. This may indicate the device or port does not support this operation."
+                }), 404
+            raise terr
+    except Exception as e:
+        logger.error(f"Port bounce troubleshooting error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/cable-test', methods=['POST'])
+@require_session
+def troubleshoot_cx_cable_test():
+    """Execute cable test on CX switch using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxcabletest
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/cableTest
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        port = data.get('port')
+
+        if not device_serial or not port:
+            return jsonify({"error": "device_serial and port are required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/cableTest',
+                data={"port": port}
+            )
+            
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED':
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response"}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Poll for completion
+            max_attempts = 60
+            poll_interval = 2
+            max_wait_time = 120  # Cable tests can take longer
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "Cable test operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/cableTest/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"Cable test operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "Cable test operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"Cable test troubleshooting error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/http-test', methods=['POST'])
+@require_session
+def troubleshoot_cx_http_test():
+    """Execute HTTP test on CX switch using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxhttp
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/httpTest
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        url = data.get('url')
+
+        if not device_serial or not url:
+            return jsonify({"error": "device_serial and url are required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/httpTest',
+                data={"url": url}
+            )
+            
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED':
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response"}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Poll for completion
+            max_attempts = 30
+            poll_interval = 1
+            max_wait_time = 30
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "HTTP test operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/httpTest/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"HTTP test operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "HTTP test operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"HTTP test troubleshooting error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/aaa-test', methods=['POST'])
+@require_session
+def troubleshoot_cx_aaa_test():
+    """Execute AAA test on CX switch using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/initiatecxaaa
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/aaaTest
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        username = data.get('username')
+        password = data.get('password')
+
+        if not device_serial or not username or not password:
+            return jsonify({"error": "device_serial, username, and password are required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/aaaTest',
+                data={"username": username, "password": password}
+            )
+            
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED':
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response"}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Poll for completion
+            max_attempts = 30
+            poll_interval = 1
+            max_wait_time = 30
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "AAA test operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/aaaTest/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"AAA test operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "AAA test operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"AAA test troubleshooting error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/show-commands', methods=['GET'])
+@require_session
+def troubleshoot_cx_list_show_commands():
+    """List available show commands for CX switch.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/listcxshowcommands
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/showCommand
+    """
+    try:
+        device_serial = request.args.get('device_serial')
+        if not device_serial:
+            return jsonify({"error": "device_serial is required"}), 400
+
+        try:
+            response = aruba_client.get(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/showCommand'
+            )
+            
+            # Transform response: combine all commands from all categories into one object
+            if isinstance(response, list):
+                all_commands = []
+                for category in response:
+                    if isinstance(category, dict) and 'commands' in category:
+                        for cmd_obj in category.get('commands', []):
+                            if isinstance(cmd_obj, dict) and 'command' in cmd_obj:
+                                # Include category name with each command
+                                all_commands.append({
+                                    "command": cmd_obj['command'],
+                                    "category": category.get('categoryName', 'Unknown')
+                                })
+                
+                # Return as single object with all commands
+                return jsonify({
+                    "commands": all_commands,
+                    "count": len(all_commands)
+                })
+            
+            return jsonify(response)
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"List show commands error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/show-command', methods=['POST'])
+@require_session
+def troubleshoot_cx_run_show_command():
+    """Run a show command on CX switch using async API.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/runcxshowcommand
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/showCommand
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        command = data.get('command')
+
+        if not device_serial or not command:
+            return jsonify({"error": "device_serial and command are required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/showCommand',
+                data={"command": command}
+            )
+            
+            location = response.get('location', '')
+            task_id_match = re.search(r'/async-operations/([a-f0-9\-]+)', location)
+            if not task_id_match:
+                if response.get('status') == 'COMPLETED':
+                    return jsonify(response)
+                return jsonify({"error": "Could not extract task ID from response"}), 500
+            
+            task_id = task_id_match.group(1)
+            
+            # Poll for completion
+            max_attempts = 30
+            poll_interval = 1
+            max_wait_time = 30
+            
+            start_time = time.time()
+            for attempt in range(max_attempts):
+                if time.time() - start_time > max_wait_time:
+                    return jsonify({
+                        "error": "Show command operation timed out",
+                        "status": "TIMEOUT",
+                        "task_id": task_id
+                    }), 504
+                
+                async_response = aruba_client.get(
+                    f'/network-troubleshooting/v1alpha1/cx/{device_serial}/showCommand/async-operations/{task_id}'
+                )
+                
+                status = async_response.get('status', 'UNKNOWN')
+                
+                if status == 'COMPLETED':
+                    return jsonify(async_response)
+                elif status == 'FAILED':
+                    fail_reason = async_response.get('failReason', 'Unknown error')
+                    return jsonify({
+                        "error": f"Show command operation failed: {fail_reason}",
+                        "status": "FAILED",
+                        "task_id": task_id
+                    }), 500
+                elif status in ['INITIATED', 'IN_PROGRESS']:
+                    time.sleep(poll_interval)
+                    continue
+                else:
+                    time.sleep(poll_interval)
+                    continue
+            
+            return jsonify({
+                "error": "Show command operation did not complete within expected time",
+                "status": "TIMEOUT",
+                "task_id": task_id
+            }), 504
+            
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"Run show command error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/locate', methods=['POST'])
+@require_session
+def troubleshoot_cx_locate():
+    """Locate a CX switch (flash LEDs).
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/locatecxswitch
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/locate
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+        enable = data.get('enable', True)
+
+        if not device_serial:
+            return jsonify({"error": "device_serial is required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/locate',
+                data={"enable": enable}
+            )
+            return jsonify(response)
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"Locate switch error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/troubleshoot/cx/reboot', methods=['POST'])
+@require_session
+def troubleshoot_cx_reboot():
+    """Reboot a CX switch.
+    
+    Reference: https://developer.arubanetworks.com/new-central/reference/rebootcxswitch
+    Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/reboot
+    """
+    try:
+        data = request.get_json()
+        device_serial = data.get('device_serial')
+
+        if not device_serial:
+            return jsonify({"error": "device_serial is required"}), 400
+
+        try:
+            response = aruba_client.post(
+                f'/network-troubleshooting/v1alpha1/cx/{device_serial}/reboot',
+                data={}
+            )
+            return jsonify(response)
+        except Exception as terr:
+            if '400' in str(terr) or '404' in str(terr):
+                return jsonify({"status": "unavailable", "result": None})
+            raise terr
+    except Exception as e:
+        logger.error(f"Reboot switch error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1695,7 +2710,7 @@ def schedule_firmware_upgrade():
     """Schedule firmware upgrade for devices."""
     try:
         data = request.get_json()
-        response = aruba_client.post('/firmware/v1/upgrade', json=data)
+        response = aruba_client.post('/firmware/v1/upgrade', data=data)
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error scheduling firmware upgrade: {e}")
@@ -2153,16 +3168,25 @@ def show_run_config():
         # Fetch running config
         try:
             response = aruba_client.get(f'/configuration/v1/devices/{serial}/configuration')
+            # Check if response has configuration field
+            if 'configuration' in response and response['configuration']:
+                return jsonify(response)
+            elif 'configuration' in response:
+                return jsonify({"configuration": "", "error": "Configuration is empty. This endpoint may not be supported for this device type."}), 404
             return jsonify(response)
         except Exception as e:
-            # Prefer 404 for missing/unsupported; fall back to empty payload
+            # Return proper error messages
             err = str(e)
-            if '404' in err or 'Not Found' in err or '400' in err or 'Bad Request' in err:
-                return jsonify({"configuration": "", "error": "Not available"}), 404
-            return jsonify({"configuration": ""})
+            if '404' in err or 'Not Found' in err:
+                return jsonify({"error": "Configuration endpoint not found. This device type may not support show run-config."}), 404
+            elif '400' in err or 'Bad Request' in err:
+                return jsonify({"error": "Bad request. The device may not support this command."}), 400
+            else:
+                logger.error(f"Show run config error for {serial}: {e}")
+                return jsonify({"error": f"Failed to fetch configuration: {err}"}), 500
     except Exception as e:
         logger.error(f"Show run config error: {e}")
-        return jsonify({"configuration": ""})
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
 
 
 @app.route('/api/troubleshoot/show-tech-support', methods=['GET'])
@@ -2176,15 +3200,23 @@ def show_tech_support():
 
         try:
             response = aruba_client.get(f'/troubleshooting/v1/devices/{serial}/tech-support')
+            # Check if response has items
+            if 'items' in response:
+                if not response['items'] or len(response['items']) == 0:
+                    return jsonify({"items": [], "count": 0, "error": "Tech support data is empty. This device may not support this command."}), 404
             return jsonify(response)
         except Exception as e:
             err = str(e)
-            if '404' in err or 'Not Found' in err or '400' in err or 'Bad Request' in err:
-                return jsonify({"items": [], "count": 0, "error": "Not available"}), 404
-            return jsonify({"items": [], "count": 0})
+            if '404' in err or 'Not Found' in err:
+                return jsonify({"error": "Tech support endpoint not found. This device type may not support this command."}), 404
+            elif '400' in err or 'Bad Request' in err:
+                return jsonify({"error": "Bad request. The device may not support this command."}), 400
+            else:
+                logger.error(f"Show tech support error for {serial}: {e}")
+                return jsonify({"error": f"Failed to fetch tech support: {err}"}), 500
     except Exception as e:
         logger.error(f"Show tech support error: {e}")
-        return jsonify({"items": [], "count": 0})
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
 
 
 @app.route('/api/troubleshoot/show-version', methods=['GET'])
@@ -2229,15 +3261,23 @@ def show_interfaces():
 
         try:
             response = aruba_client.get(f'/network-monitoring/v1alpha1/switch/{serial}/interfaces')
+            # Check if response has interfaces
+            if 'interfaces' in response:
+                if not response['interfaces'] or len(response['interfaces']) == 0:
+                    return jsonify({"interfaces": [], "count": 0, "error": "No interfaces found. This command is typically only available for switches."}), 404
             return jsonify(response)
         except Exception as e:
             err = str(e)
-            if '404' in err or 'Not Found' in err or '400' in err or 'Bad Request' in err:
-                return jsonify({"interfaces": [], "count": 0, "error": "Not available"}), 404
-            return jsonify({"interfaces": [], "count": 0})
+            if '404' in err or 'Not Found' in err:
+                return jsonify({"error": "Interfaces endpoint not found. This command is typically only available for switches."}), 404
+            elif '400' in err or 'Bad Request' in err:
+                return jsonify({"error": "Bad request. The device may not be a switch or may not support this command."}), 400
+            else:
+                logger.error(f"Show interfaces error for {serial}: {e}")
+                return jsonify({"error": f"Failed to fetch interfaces: {err}"}), 500
     except Exception as e:
         logger.error(f"Show interfaces error: {e}")
-        return jsonify({"interfaces": [], "count": 0})
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
 
 
 @app.route('/api/config/export', methods=['GET'])
@@ -4465,11 +5505,18 @@ def serve_react_app(path):
     if path.startswith('api/'):
         return jsonify({"error": "Endpoint not found"}), 404
 
-    # If the path exists as a static file, serve it directly
+    # If the path exists as a static file, serve it directly with cache headers
     if path and app.static_folder:
         file_path = Path(app.static_folder) / path
         if file_path.exists() and file_path.is_file():
-            return send_from_directory(app.static_folder, path)
+            response = send_from_directory(app.static_folder, path)
+            # Add cache headers for static assets
+            response = add_cache_headers(response, is_static=True)
+            # Add ETag for cache validation
+            with open(file_path, 'rb') as f:
+                content = f.read()
+            response = add_etag_header(response, content)
+            return response
 
     # For all other paths (including React routes), serve index.html
     # This allows React Router to handle the routing
@@ -4572,6 +5619,1268 @@ def handle_central_api_error(error):
 
     return response
 
+
+# ============= Configuration API - Network Config v1alpha1 =============
+# Comprehensive Configuration API endpoints based on Aruba Central Configuration API
+# Reference: https://developer.arubanetworks.com/new-central-config/reference
+
+# ============= Scope Management APIs =============
+
+@app.route('/api/config/sites', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/sites', error_msg="Get sites", fallback_data={"items": [], "count": 0})
+def get_config_sites(): pass
+
+@app.route('/api/config/sites', methods=['POST'])
+@require_session
+def create_config_site():
+    """Create a new site."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/sites', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating site: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/sites', methods=['PUT'])
+@require_session
+def update_config_site():
+    """Update an existing site."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.put('/network-config/v1alpha1/sites', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating site: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/sites', methods=['DELETE'])
+@require_session
+def delete_config_site():
+    """Delete a site by scope-id."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        scope_id = request.args.get('scope-id')
+        if not scope_id:
+            return jsonify({"error": "scope-id query parameter is required"}), 400
+        params = {'scope-id': scope_id}
+        response = aruba_client.delete('/network-config/v1alpha1/sites', params=params)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting site: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/sites/bulk-delete', methods=['DELETE'])
+@require_session
+def bulk_delete_sites():
+    """Bulk delete sites."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.delete('/network-config/v1alpha1/sites/bulk-delete', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error bulk deleting sites: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/site-collections', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/site-collections', error_msg="Get site collections", fallback_data={"items": [], "count": 0})
+def get_site_collections(): pass
+
+@app.route('/api/config/site-collections', methods=['POST'])
+@require_session
+def create_site_collection():
+    """Create a new site-collection."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/site-collections', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating site-collection: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/site-collections', methods=['PUT'])
+@require_session
+def update_site_collection():
+    """Update an existing site-collection."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.put('/network-config/v1alpha1/site-collections', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating site-collection: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/site-collections', methods=['DELETE'])
+@require_session
+def delete_site_collection():
+    """Delete a site-collection by scope-id."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        scope_id = request.args.get('scope-id')
+        if not scope_id:
+            return jsonify({"error": "scope-id query parameter is required"}), 400
+        params = {'scope-id': scope_id}
+        response = aruba_client.delete('/network-config/v1alpha1/site-collections', params=params)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting site-collection: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/site-collections/bulk-delete', methods=['DELETE'])
+@require_session
+def bulk_delete_site_collections():
+    """Bulk delete site-collections."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.delete('/network-config/v1alpha1/site-collections/bulk-delete', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error bulk deleting site-collections: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/site-collections/add-sites', methods=['POST'])
+@require_session
+def add_sites_to_collection():
+    """Add sites to an existing site-collection."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/site-collections/add-sites', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error adding sites to collection: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/site-collections/remove-sites', methods=['DELETE'])
+@require_session
+def remove_sites_from_collection():
+    """Remove sites from site-collection."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.delete('/network-config/v1alpha1/site-collections/remove-sites', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error removing sites from collection: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/device-groups', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/device-groups', error_msg="Get device groups", fallback_data={"items": [], "count": 0})
+def get_device_groups(): pass
+
+@app.route('/api/config/scope-hierarchy', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/hierarchy', error_msg="Get scope hierarchy", fallback_data={})
+def get_scope_hierarchy(): pass
+
+# ============= Template Support Endpoints =============
+
+@app.route('/api/config/templates/<resource>', methods=['GET'])
+@require_session
+def get_templates_for_resource(resource):
+    """Get available templates for a resource type."""
+    try:
+        # Return template definitions for the resource
+        # This will be expanded with actual template files later
+        templates = {
+            'sites': [
+                {'id': 'sites-csv', 'name': 'Sites (CSV)', 'format': 'csv', 'description': 'CSV format for bulk site import'},
+                {'id': 'sites-json', 'name': 'Sites (JSON)', 'format': 'json', 'description': 'JSON format for site import'}
+            ],
+            'mac-registrations': [
+                {'id': 'mac-csv', 'name': 'MAC Registrations (CSV)', 'format': 'csv', 'description': 'CSV format for MAC registration import'},
+                {'id': 'mac-json', 'name': 'MAC Registrations (JSON)', 'format': 'json', 'description': 'JSON format for MAC registration import'}
+            ]
+        }
+        return jsonify({'templates': templates.get(resource, [])})
+    except Exception as e:
+        logger.error(f"Error getting templates: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/templates/<resource>/<template_id>', methods=['GET'])
+@require_session
+def download_template(resource, template_id):
+    """Download a template file."""
+    try:
+        # TODO: Serve actual template files from backend
+        # For now, return a JSON response with template content
+        from flask import make_response
+        response = make_response('template content here')
+        response.headers['Content-Type'] = 'text/csv' if 'csv' in template_id else 'application/json'
+        response.headers['Content-Disposition'] = f'attachment; filename={template_id}'
+        return response
+    except Exception as e:
+        logger.error(f"Error downloading template: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/<resource>/import', methods=['POST'])
+@require_session
+def import_resource(resource):
+    """Import resources from file (CSV/JSON)."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        
+        template_id = request.form.get('template_id')
+        file = request.files.get('file')
+        
+        if not file:
+            return jsonify({"error": "No file provided"}), 400
+        
+        # TODO: Parse file and validate against template
+        # TODO: Call appropriate API endpoints to create/update resources
+        
+        return jsonify({"message": "Import functionality coming soon", "resource": resource, "template": template_id})
+    except Exception as e:
+        logger.error(f"Error importing {resource}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/<resource>/export', methods=['GET'])
+@require_session
+def export_resource(resource):
+    """Export resources to file (CSV/JSON)."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        
+        format = request.args.get('format', 'csv')
+        # TODO: Fetch resources and format as CSV/JSON
+        
+        return jsonify({"message": "Export functionality coming soon", "resource": resource, "format": format})
+    except Exception as e:
+        logger.error(f"Error exporting {resource}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ============= Application Experience APIs =============
+
+@app.route('/api/config/airgroup-system', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/airgroup-system', error_msg="Get airgroup system", fallback_data={})
+def get_airgroup_system(): pass
+
+@app.route('/api/config/airgroup-system', methods=['POST'])
+@require_session
+def create_airgroup_system():
+    """Create new airgroup system configuration."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/airgroup-system', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating airgroup system: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-system', methods=['PATCH'])
+@require_session
+def update_airgroup_system():
+    """Modify airgroup system configuration."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch('/network-config/v1alpha1/airgroup-system', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating airgroup system: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-system', methods=['DELETE'])
+@require_session
+def delete_airgroup_system():
+    """Delete airgroup system."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete('/network-config/v1alpha1/airgroup-system')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting airgroup system: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/app-recog-control', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/app-recog-control', error_msg="Get ARC configuration", fallback_data={})
+def get_app_recog_control(): pass
+
+@app.route('/api/config/app-recog-control/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/app-recog-control/{name}', error_msg="Get ARC profile", fallback_data={})
+def get_app_recog_control_profile(name): pass
+
+@app.route('/api/config/app-recog-control/<name>', methods=['POST'])
+@require_session
+def create_app_recog_control_profile(name):
+    """Create new ARC profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/app-recog-control/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating ARC profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/app-recog-control/<name>', methods=['PATCH'])
+@require_session
+def update_app_recog_control_profile(name):
+    """Update ARC profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/app-recog-control/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating ARC profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/app-recog-control/<name>', methods=['DELETE'])
+@require_session
+def delete_app_recog_control_profile(name):
+    """Delete ARC profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/app-recog-control/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting ARC profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/ucc', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/ucc', error_msg="Get UCC configuration", fallback_data={})
+def get_ucc(): pass
+
+@app.route('/api/config/ucc/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/ucc/{name}', error_msg="Get UCC profile", fallback_data={})
+def get_ucc_profile(name): pass
+
+@app.route('/api/config/ucc/<name>', methods=['POST'])
+@require_session
+def create_ucc_profile(name):
+    """Create UCC profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/ucc/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating UCC profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/ucc/<name>', methods=['PATCH'])
+@require_session
+def update_ucc_profile(name):
+    """Update UCC profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/ucc/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating UCC profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/ucc/<name>', methods=['DELETE'])
+@require_session
+def delete_ucc_profile(name):
+    """Delete UCC profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/ucc/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting UCC profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-policy', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/airgroup-policies', error_msg="Get airgroup policies", fallback_data={"items": [], "count": 0})
+def get_airgroup_policies(): pass
+
+@app.route('/api/config/airgroup-policy', methods=['POST'])
+@require_session
+def create_airgroup_policy():
+    """Create new airgroup policy."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/airgroup-policies', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating airgroup policy: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-policy/<policy_id>', methods=['GET'])
+@require_session
+@api_proxy(lambda policy_id: f'/network-config/v1alpha1/airgroup-policies/{policy_id}', error_msg="Get airgroup policy", fallback_data={})
+def get_airgroup_policy(policy_id): pass
+
+@app.route('/api/config/airgroup-policy/<policy_id>', methods=['PATCH'])
+@require_session
+def update_airgroup_policy(policy_id):
+    """Update airgroup policy."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/airgroup-policies/{policy_id}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating airgroup policy: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-policy/<policy_id>', methods=['DELETE'])
+@require_session
+def delete_airgroup_policy(policy_id):
+    """Delete airgroup policy."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/airgroup-policies/{policy_id}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting airgroup policy: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-service-definition', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/airgroup-service-definitions', error_msg="Get airgroup service definitions", fallback_data={"items": [], "count": 0})
+def get_airgroup_service_definitions(): pass
+
+@app.route('/api/config/airgroup-service-definition', methods=['POST'])
+@require_session
+def create_airgroup_service_definition():
+    """Create new airgroup service definition."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/airgroup-service-definitions', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating airgroup service definition: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-service-definition/<definition_id>', methods=['GET'])
+@require_session
+@api_proxy(lambda definition_id: f'/network-config/v1alpha1/airgroup-service-definitions/{definition_id}', error_msg="Get airgroup service definition", fallback_data={})
+def get_airgroup_service_definition(definition_id): pass
+
+@app.route('/api/config/airgroup-service-definition/<definition_id>', methods=['PATCH'])
+@require_session
+def update_airgroup_service_definition(definition_id):
+    """Update airgroup service definition."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/airgroup-service-definitions/{definition_id}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating airgroup service definition: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/airgroup-service-definition/<definition_id>', methods=['DELETE'])
+@require_session
+def delete_airgroup_service_definition(definition_id):
+    """Delete airgroup service definition."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/airgroup-service-definitions/{definition_id}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting airgroup service definition: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ============= Central NAC APIs =============
+
+# CDA Endpoint helper - removed dynamic function creation to avoid Flask endpoint conflicts
+# Instead, create endpoints individually
+
+@app.route('/api/config/cda-authz-policy', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/cda-authz-policy', error_msg="Get CDA authz policy", fallback_data={})
+def get_cda_authz_policy(): pass
+
+@app.route('/api/config/cda-authz-policy', methods=['POST'])
+@require_session
+def create_cda_authz_policy():
+    """Create CDA authorization policy."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/cda-authz-policy', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA authz policy: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-authz-policy', methods=['PATCH'])
+@require_session
+def update_cda_authz_policy():
+    """Update CDA authorization policy."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch('/network-config/v1alpha1/cda-authz-policy', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA authz policy: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-authz-policy', methods=['DELETE'])
+@require_session
+def delete_cda_authz_policy():
+    """Delete CDA authorization policy."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete('/network-config/v1alpha1/cda-authz-policy')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA authz policy: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-airpass-approval', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/cda-airpass-approval', error_msg="Get Air Pass approval", fallback_data={})
+def get_cda_airpass_approval(): pass
+
+@app.route('/api/config/cda-identity-store', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/cda-identity-store', error_msg="Get CDA identity store", fallback_data={})
+def get_cda_identity_store(): pass
+
+@app.route('/api/config/cda-identity-store', methods=['POST'])
+@require_session
+def create_cda_identity_store():
+    """Create CDA identity store."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/cda-identity-store', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA identity store: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-identity-store', methods=['PATCH'])
+@require_session
+def update_cda_identity_store():
+    """Update CDA identity store."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch('/network-config/v1alpha1/cda-identity-store', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA identity store: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-identity-store', methods=['DELETE'])
+@require_session
+def delete_cda_identity_store():
+    """Delete CDA identity store."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete('/network-config/v1alpha1/cda-identity-store')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA identity store: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# CDA Portal Profile (with name parameter)
+@app.route('/api/config/cda-portal-profile', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/cda-portal-profiles', error_msg="Get CDA portal profiles", fallback_data={"items": []})
+def get_cda_portal_profiles(): pass
+
+@app.route('/api/config/cda-portal-profile/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/cda-portal-profiles/{name}', error_msg="Get CDA portal profile", fallback_data={})
+def get_cda_portal_profile(name): pass
+
+@app.route('/api/config/cda-portal-profile/<name>', methods=['POST'])
+@require_session
+def create_cda_portal_profile(name):
+    """Create CDA portal profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/cda-portal-profiles/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA portal profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-portal-profile/<name>', methods=['PATCH'])
+@require_session
+def update_cda_portal_profile(name):
+    """Update CDA portal profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/cda-portal-profiles/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA portal profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-portal-profile/<name>', methods=['DELETE'])
+@require_session
+def delete_cda_portal_profile(name):
+    """Delete CDA portal profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/cda-portal-profiles/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA portal profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# CDA Auth Profile
+@app.route('/api/config/cda-auth-profile', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/cda-auth-profile', error_msg="Get CDA auth profile", fallback_data={})
+def get_cda_auth_profile(): pass
+
+@app.route('/api/config/cda-auth-profile', methods=['POST'])
+@require_session
+def create_cda_auth_profile():
+    """Create CDA auth profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/cda-auth-profile', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA auth profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-auth-profile', methods=['PATCH'])
+@require_session
+def update_cda_auth_profile():
+    """Update CDA auth profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch('/network-config/v1alpha1/cda-auth-profile', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA auth profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-auth-profile', methods=['DELETE'])
+@require_session
+def delete_cda_auth_profile():
+    """Delete CDA auth profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete('/network-config/v1alpha1/cda-auth-profile')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA auth profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# CDA Portal Skin Profile (with name parameter)
+@app.route('/api/config/cda-portal-skin-profile/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/cda-portal-skin-profiles/{name}', error_msg="Get CDA portal skin profile", fallback_data={})
+def get_cda_portal_skin_profile(name): pass
+
+@app.route('/api/config/cda-portal-skin-profile/<name>', methods=['POST'])
+@require_session
+def create_cda_portal_skin_profile(name):
+    """Create CDA portal skin profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/cda-portal-skin-profiles/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA portal skin profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-portal-skin-profile/<name>', methods=['PATCH'])
+@require_session
+def update_cda_portal_skin_profile(name):
+    """Update CDA portal skin profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/cda-portal-skin-profiles/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA portal skin profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-portal-skin-profile/<name>', methods=['DELETE'])
+@require_session
+def delete_cda_portal_skin_profile(name):
+    """Delete CDA portal skin profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/cda-portal-skin-profiles/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA portal skin profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# CDA Message Provider (with name parameter)
+@app.route('/api/config/cda-message-provider/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/cda-message-providers/{name}', error_msg="Get CDA message provider", fallback_data={})
+def get_cda_message_provider(name): pass
+
+@app.route('/api/config/cda-message-provider/<name>', methods=['POST'])
+@require_session
+def create_cda_message_provider(name):
+    """Create CDA message provider."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/cda-message-providers/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA message provider: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-message-provider/<name>', methods=['PATCH'])
+@require_session
+def update_cda_message_provider(name):
+    """Update CDA message provider."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/cda-message-providers/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA message provider: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-message-provider/<name>', methods=['DELETE'])
+@require_session
+def delete_cda_message_provider(name):
+    """Delete CDA message provider."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/cda-message-providers/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA message provider: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# CDA Portal Overrides Profile (with name parameter)
+@app.route('/api/config/cda-portal-overrides-profile/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/cda-portal-overrides-profiles/{name}', error_msg="Get CDA portal overrides profile", fallback_data={})
+def get_cda_portal_overrides_profile(name): pass
+
+@app.route('/api/config/cda-portal-overrides-profile/<name>', methods=['POST'])
+@require_session
+def create_cda_portal_overrides_profile(name):
+    """Create CDA portal overrides profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/cda-portal-overrides-profiles/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating CDA portal overrides profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-portal-overrides-profile/<name>', methods=['PATCH'])
+@require_session
+def update_cda_portal_overrides_profile(name):
+    """Update CDA portal overrides profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/cda-portal-overrides-profiles/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating CDA portal overrides profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/cda-portal-overrides-profile/<name>', methods=['DELETE'])
+@require_session
+def delete_cda_portal_overrides_profile(name):
+    """Delete CDA portal overrides profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/cda-portal-overrides-profiles/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting CDA portal overrides profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ============= Central NAC Service APIs =============
+
+@app.route('/api/config/nac/mac-registration', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/mac-registration', error_msg="Get MAC registrations", fallback_data={"items": [], "count": 0})
+def get_mac_registrations(): pass
+
+@app.route('/api/config/nac/mac-registration', methods=['POST'])
+@require_session
+def create_mac_registration():
+    """Add MAC registration."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/mac-registration', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating MAC registration: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/nac/mac-registration/<mac_id>', methods=['PUT'])
+@require_session
+def update_mac_registration(mac_id):
+    """Update MAC registration."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.put(f'/network-config/v1alpha1/mac-registration/{mac_id}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating MAC registration: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/nac/mac-registration/<mac_id>', methods=['DELETE'])
+@require_session
+def delete_mac_registration(mac_id):
+    """Delete MAC registration."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/mac-registration/{mac_id}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting MAC registration: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/nac/mac-registration/export', methods=['GET'])
+@require_session
+def export_mac_registration():
+    """Export MAC registrations as CSV."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.get('/network-config/v1alpha1/mac-registration/export')
+        from flask import make_response
+        resp = make_response(response.get('csv', ''))
+        resp.headers['Content-Type'] = 'text/csv'
+        resp.headers['Content-Disposition'] = 'attachment; filename=mac-registrations.csv'
+        return resp
+    except Exception as e:
+        logger.error(f"Error exporting MAC registrations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/nac/mac-registration/import', methods=['POST'])
+@require_session
+def import_mac_registration():
+    """Import MAC registrations from CSV."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "No file provided"}), 400
+        # TODO: Process CSV file and create registrations
+        return jsonify({"message": "Import functionality in progress"})
+    except Exception as e:
+        logger.error(f"Error importing MAC registrations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# MPSK Registration endpoints (similar pattern)
+@app.route('/api/config/nac/mpsk-registration', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/mpsk-registration', error_msg="Get MPSK registrations", fallback_data={"items": [], "count": 0})
+def get_mpsk_registrations(): pass
+
+@app.route('/api/config/nac/visitor', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/visitor', error_msg="Get visitors", fallback_data={"items": [], "count": 0})
+def get_visitors(): pass
+
+@app.route('/api/config/nac/job', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/job', error_msg="Get jobs", fallback_data={"items": [], "count": 0})
+def get_jobs(): pass
+
+@app.route('/api/config/nac/image', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/image', error_msg="Get images", fallback_data={"items": [], "count": 0})
+def get_images(): pass
+
+@app.route('/api/config/nac/user-certificate', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/user-certificate', error_msg="Get user certificates", fallback_data={"items": [], "count": 0})
+def get_user_certificates(): pass
+
+# ============= Config Management APIs =============
+
+@app.route('/api/config/checkpoint', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/config-checkpoint', error_msg="Get checkpoints", fallback_data={"items": [], "count": 0})
+def get_checkpoints(): pass
+
+@app.route('/api/config/checkpoint', methods=['POST'])
+@require_session
+def create_checkpoint():
+    """Create configuration checkpoint."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post('/network-config/v1alpha1/config-checkpoint', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating checkpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ============= Configuration Health APIs =============
+
+@app.route('/api/config/health/device', methods=['GET'])
+@require_session
+def get_config_health_device():
+    """Get active configuration issues for a device."""
+    try:
+        device_id = request.args.get('device_id')
+        if not device_id:
+            return jsonify({"error": "device_id query parameter is required"}), 400
+        response = aruba_client.get(f'/network-config/v1alpha1/configuration-health/{device_id}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error getting device config health: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/health/summary', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/configuration-health', error_msg="Get config health summary", fallback_data={})
+def get_config_health_summary(): pass
+
+@app.route('/api/config/health/active-issue', methods=['GET'])
+@require_session
+def get_config_health_active_issue():
+    """Get active configuration issues for a device by serial number."""
+    try:
+        serial = request.args.get('serial')
+        if not serial:
+            return jsonify({"error": "serial query parameter is required"}), 400
+        response = aruba_client.get('/network-config/v1alpha1/config-health/active-issue', params={'serial': serial})
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error getting device config health active issues: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ============= Extensions APIs =============
+
+@app.route('/api/config/extension/vsphere-instances', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/extension-vsphere-instances', error_msg="Get vSphere instances", fallback_data={"items": [], "count": 0})
+def get_vsphere_instances(): pass
+
+@app.route('/api/config/extension/vsphere-instance/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/extension-vsphere-instance/{name}', error_msg="Get vSphere instance", fallback_data={})
+def get_vsphere_instance(name): pass
+
+# ============= High Availability APIs =============
+
+@app.route('/api/config/stack', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/switch-stack', error_msg="Get stacks", fallback_data={"items": [], "count": 0})
+def get_stacks(): pass
+
+@app.route('/api/config/vsx/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/vsx/{name}', error_msg="Get VSX profile", fallback_data={})
+def get_vsx(name): pass
+
+# ============= Interface APIs =============
+
+@app.route('/api/config/device-profile', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/device-profile', error_msg="Get device profiles", fallback_data={"items": [], "count": 0})
+def get_device_profiles(): pass
+
+@app.route('/api/config/device-profile', methods=['POST'])
+@require_session
+def create_device_profile():
+    """Create a new device profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+        response = aruba_client.post('/network-config/v1alpha1/device-profile', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating device profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/device-profile/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/device-profile/{name}', error_msg="Get device profile", fallback_data={})
+def get_device_profile(name): pass
+
+@app.route('/api/config/device-profile/<name>', methods=['PATCH'])
+@require_session
+def update_device_profile(name):
+    """Update an existing device profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+        response = aruba_client.patch(f'/network-config/v1alpha1/device-profile/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating device profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/device-profile/<name>', methods=['DELETE'])
+@require_session
+def delete_device_profile(name):
+    """Delete a device profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/device-profile/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting device profile: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ============= Interface Security APIs =============
+
+@app.route('/api/config/mac-lockout/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/mac-lockout/{name}', error_msg="Get MAC lockout profile", fallback_data={})
+def get_mac_lockout(name): pass
+
+@app.route('/api/config/macsec', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/macsec', error_msg="Get MACsec configuration", fallback_data={})
+def get_macsec(): pass
+
+# ============= Interfaces APIs =============
+
+@app.route('/api/config/interface/loopback', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/interface-loopback', error_msg="Get loopback interfaces", fallback_data={"items": [], "count": 0})
+def get_loopback_interfaces(): pass
+
+@app.route('/api/config/interface/management', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/interface-management', error_msg="Get management interfaces", fallback_data={"items": [], "count": 0})
+def get_management_interfaces(): pass
+
+@app.route('/api/config/wlan', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/wlan', error_msg="Get WLANs", fallback_data={"items": [], "count": 0})
+def get_config_wlans(): pass
+
+@app.route('/api/config/wlan/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/wlan/{name}', error_msg="Get WLAN profile", fallback_data={})
+def get_config_wlan(name): pass
+
+@app.route('/api/config/wlan/<name>', methods=['POST'])
+@require_session
+def create_config_wlan(name):
+    """Create WLAN profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.post(f'/network-config/v1alpha1/wlan/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error creating WLAN: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/wlan/<name>', methods=['PATCH'])
+@require_session
+def update_config_wlan(name):
+    """Update WLAN profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        data = request.get_json()
+        response = aruba_client.patch(f'/network-config/v1alpha1/wlan/{name}', data=data)
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error updating WLAN: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/wlan/<name>', methods=['DELETE'])
+@require_session
+def delete_config_wlan(name):
+    """Delete WLAN profile."""
+    try:
+        if not aruba_client:
+            return jsonify({"error": "Server not configured"}), 500
+        response = aruba_client.delete(f'/network-config/v1alpha1/wlan/{name}')
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error deleting WLAN: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config/radio/<name>', methods=['GET'])
+@require_session
+@api_proxy(lambda name: f'/network-config/v1alpha1/radio/{name}', error_msg="Get radio profile", fallback_data={})
+def get_radio(name): pass
+
+@app.route('/api/config/vlan', methods=['GET'])
+@require_session
+@api_proxy('/network-config/v1alpha1/vlan', error_msg="Get VLANs", fallback_data={"items": [], "count": 0})
+def get_config_vlans(): pass
+
+@app.route('/api/config/vlan/<vlan_id>', methods=['GET'])
+@require_session
+@api_proxy(lambda vlan_id: f'/network-config/v1alpha1/vlan/{vlan_id}', error_msg="Get VLAN", fallback_data={})
+def get_config_vlan(vlan_id): pass
+
+# ============= Switch Configuration Profiles =============
+
+@app.route('/api/config/switch/<serial>/profile', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/profile', error_msg="Get switch profile", fallback_data={})
+def get_switch_profile(serial): pass
+
+@app.route('/api/config/switch/<serial>/miscellaneous', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/miscellaneous', error_msg="Get switch miscellaneous", fallback_data={})
+def get_switch_miscellaneous(serial): pass
+
+@app.route('/api/config/switch/<serial>/named-objects', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/named-objects', error_msg="Get switch named objects", fallback_data={})
+def get_switch_named_objects(serial): pass
+
+@app.route('/api/config/switch/<serial>/network-services', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/network-services', error_msg="Get switch network services", fallback_data={})
+def get_switch_network_services(serial): pass
+
+@app.route('/api/config/switch/<serial>/roles-policies', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/roles-policies', error_msg="Get switch roles policies", fallback_data={})
+def get_switch_roles_policies(serial): pass
+
+@app.route('/api/config/switch/<serial>/routing-overlay', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/routing-overlay', error_msg="Get switch routing overlay", fallback_data={})
+def get_switch_routing_overlay(serial): pass
+
+@app.route('/api/config/switch/<serial>/security', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/security', error_msg="Get switch security", fallback_data={})
+def get_switch_security(serial): pass
+
+@app.route('/api/config/switch/<serial>/services', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/services', error_msg="Get switch services", fallback_data={})
+def get_switch_services(serial): pass
+
+@app.route('/api/config/switch/<serial>/system', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/system', error_msg="Get switch system", fallback_data={})
+def get_switch_system_config(serial): pass
+
+@app.route('/api/config/switch/<serial>/telemetry', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/telemetry', error_msg="Get switch telemetry", fallback_data={})
+def get_switch_telemetry(serial): pass
+
+@app.route('/api/config/switch/<serial>/tunnels', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/tunnels', error_msg="Get switch tunnels", fallback_data={})
+def get_switch_tunnels(serial): pass
+
+@app.route('/api/config/switch/<serial>/vlans-networks', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/cx/{serial}/vlans-networks', error_msg="Get switch VLANs networks", fallback_data={})
+def get_switch_vlans_networks(serial): pass
+
+# ============= Wireless Configuration Profiles =============
+
+@app.route('/api/config/wireless/<serial>/profile', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/aps/{serial}/profile', error_msg="Get wireless profile", fallback_data={})
+def get_wireless_profile(serial): pass
+
+@app.route('/api/config/wireless/<serial>/radios', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/aps/{serial}/radios', error_msg="Get wireless radios", fallback_data={})
+def get_wireless_radios(serial): pass
+
+@app.route('/api/config/wireless/<serial>/wlans', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/aps/{serial}/wlans', error_msg="Get wireless WLANs", fallback_data={})
+def get_wireless_wlans(serial): pass
+
+@app.route('/api/config/wireless/<serial>/system', methods=['GET'])
+@require_session
+@api_proxy(lambda serial: f'/network-config/v1alpha1/aps/{serial}/system', error_msg="Get wireless system", fallback_data={})
+def get_wireless_system(serial): pass
 
 # ============= Main =============
 

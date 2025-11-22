@@ -1,7 +1,7 @@
 # Security Assessment Report
 
 **Application**: Aruba Central Dashboard
-**Version**: 1.0.0
+**Version**: 2.0.0
 **Assessment Date**: November 2025
 **Assessment Type**: Architecture Review & Code Analysis
 
