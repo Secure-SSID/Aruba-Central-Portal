@@ -80,7 +80,7 @@ TEST_CONFIGS = [
         }
     },
     {
-        "name": "bridge_enhanced_open",
+        "name": "owe",
         "description": "Bridged Enhanced Open",
         "wizardData": {
             "wlanName": None,
@@ -100,7 +100,7 @@ TEST_CONFIGS = [
         }
     },
     {
-        "name": "bridge_open",
+        "name": "open",
         "description": "Bridged Open",
         "wizardData": {
             "wlanName": None,
@@ -116,6 +116,47 @@ TEST_CONFIGS = [
             "vlanId": "1",
             "forwardMode": "FORWARD_MODE_BRIDGE",
             "gatewaySerial": "",
+            "gatewayName": "",
+        }
+    },
+    # Tunnel Mode Tests
+    {
+        "name": "tunnel_wpa2",
+        "description": "Tunneled WPA2-Personal",
+        "wizardData": {
+            "wlanName": None,
+            "ssidBroadcastName": None,
+            "description": "Test WLAN - Tunneled WPA2-Personal",
+            "enabled": True,
+            "scopeType": "global",
+            "scopeId": None,
+            "scopeName": "Global",
+            "securityLevel": "Personal",
+            "authType": "WPA2-Personal",
+            "passphrase": "TestPassword123!",
+            "vlanId": "1",
+            "forwardMode": "FORWARD_MODE_L2",  # L2 Tunnel mode
+            "gatewaySerial": "",  # Will be filled with actual gateway
+            "gatewayName": "",
+        }
+    },
+    {
+        "name": "tunnel_wpa3",
+        "description": "Tunneled WPA3-Personal",
+        "wizardData": {
+            "wlanName": None,
+            "ssidBroadcastName": None,
+            "description": "Test WLAN - Tunneled WPA3-Personal",
+            "enabled": True,
+            "scopeType": "global",
+            "scopeId": None,
+            "scopeName": "Global",
+            "securityLevel": "Personal",
+            "authType": "WPA3-Personal",
+            "passphrase": "TestPassword123!",
+            "vlanId": "1",
+            "forwardMode": "FORWARD_MODE_L2",  # L2 Tunnel mode
+            "gatewaySerial": "",  # Will be filled with actual gateway
             "gatewayName": "",
         }
     },
@@ -162,9 +203,14 @@ def create_wlan_via_wizard(config, timestamp, session_id, gateway=None):
     wizard_data['wlanName'] = wlan_name
     wizard_data['ssidBroadcastName'] = ssid_name
 
+    # DEBUG: Print gateway info
+    console.print(f"[dim]DEBUG: Gateway object: {gateway}[/dim]")
+    console.print(f"[dim]DEBUG: Forward mode: {wizard_data.get('forwardMode')}[/dim]")
+
     if gateway and wizard_data.get('forwardMode') == 'FORWARD_MODE_L2':
-        wizard_data['gatewaySerial'] = gateway.get('serial', '')
-        wizard_data['gatewayName'] = gateway.get('name', '')
+        wizard_data['gatewaySerial'] = gateway.get('serialNumber', gateway.get('serial', ''))
+        wizard_data['gatewayName'] = gateway.get('deviceName', gateway.get('name', ''))
+        console.print(f"[dim]DEBUG: Added gateway serial to wizard_data: {wizard_data['gatewaySerial']}[/dim]")
 
     result = {
         'config': config['description'],
@@ -269,6 +315,16 @@ def create_wlan_via_wizard(config, timestamp, session_id, gateway=None):
         if wizard_data['authType'] == 'WPA2/WPA3-Personal':
             wlan_config['wpa3-transition-mode-enable'] = True
 
+        # Add gateway for tunnel mode
+        console.print(f"[dim]DEBUG: Checking gateway assignment - forwardMode={wizard_data['forwardMode']}, gatewaySerial={wizard_data.get('gatewaySerial')}[/dim]")
+        if wizard_data['forwardMode'] == 'FORWARD_MODE_L2' and wizard_data.get('gatewaySerial'):
+            wlan_config['gateway'] = wizard_data['gatewaySerial']
+            console.print(f"[dim]Using gateway: {wizard_data['gatewayName']} ({wizard_data['gatewaySerial']})[/dim]")
+            console.print(f"[dim]DEBUG: Gateway field added to wlan_config[/dim]")
+        else:
+            console.print(f"[dim]DEBUG: Gateway NOT added - forwardMode is L2: {wizard_data['forwardMode'] == 'FORWARD_MODE_L2'}, has gatewaySerial: {bool(wizard_data.get('gatewaySerial'))}[/dim]")
+
+        console.print(f"[dim]DEBUG: Final wlan_config keys: {list(wlan_config.keys())}[/dim]")
         console.print(f"[dim]Creating WLAN {wlan_name}...[/dim]")
 
         wlan_response = requests.post(

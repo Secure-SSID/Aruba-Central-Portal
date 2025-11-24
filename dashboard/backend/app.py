@@ -800,13 +800,18 @@ def create_wlan_config(ssid_name):
         params = request.args.to_dict()  # Get query parameters
         logger.info(f"Creating WLAN {ssid_name} with data: {wlan_data}")
         logger.info(f"Query parameters: {params}")
-        response = aruba_client.post(f'/network-config/v1alpha1/wlan-ssids/{ssid_name}', data=wlan_data, params=params)
+        response = aruba_client.post(f'/network-config/v1alpha1/wlan-ssids/{ssid_name}', json=wlan_data)
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error creating WLAN {ssid_name}: {e}")
         # Try to get more details from the error
         if hasattr(e, 'response') and hasattr(e.response, 'text'):
             logger.error(f"API response: {e.response.text}")
+            try:
+                error_json = e.response.json()
+                logger.error(f"API error details: {error_json}")
+            except:
+                pass
         return jsonify({"error": str(e)}), 500
 
 
@@ -4365,6 +4370,68 @@ def greenlake_unassign_role(assignment_id):
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake role unassignment error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ─────────────────────────────────────────────────────────────────────────
+# GreenLake Permissions Management
+# ─────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/greenlake/permissions', methods=['GET'])
+@require_session
+def greenlake_list_permissions():
+    """List all available permissions in GreenLake."""
+    try:
+        client = _get_greenlake_client()
+        if not client:
+            # Return default permission set if GreenLake not configured
+            return jsonify({
+                "permissions": [
+                    "workspace.view", "workspace.create", "workspace.update", "workspace.delete",
+                    "users.view", "users.invite", "users.update", "users.delete",
+                    "roles.view", "roles.assign", "roles.create", "roles.update", "roles.delete",
+                    "devices.view", "devices.add", "devices.update", "devices.delete", "devices.subscribe",
+                    "subscriptions.view", "subscriptions.create", "subscriptions.update", "subscriptions.transfer",
+                ]
+            }), 200
+        # Call GreenLake Authorization API to get permissions
+        data = client.get('/authorization/v1/permissions')
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"GreenLake permissions list error: {e}")
+        # Graceful fallback
+        return jsonify({"permissions": []}), 200
+
+@app.route('/api/greenlake/role-permissions', methods=['GET'])
+@require_session
+def greenlake_role_permissions_map():
+    """Get mapping of roles to their permissions."""
+    try:
+        client = _get_greenlake_client()
+        if not client:
+            return jsonify({}), 200
+        # Call GreenLake Authorization API to get role-permission mappings
+        data = client.get('/authorization/v1/role-permissions')
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"GreenLake role-permissions map error: {e}")
+        return jsonify({}), 200
+
+@app.route('/api/greenlake/custom-roles', methods=['POST'])
+@require_session
+def greenlake_create_custom_role():
+    """Create a custom role with specific permissions."""
+    try:
+        client = _get_greenlake_client()
+        if not client:
+            return jsonify({"error": "GreenLake RBAC not configured"}), 400
+        payload = request.get_json() or {}
+        if not payload.get('name') or not payload.get('permissions'):
+            return jsonify({"error": "Role name and permissions are required"}), 400
+        # Call GreenLake Authorization API to create custom role
+        data = client.post('/authorization/v1/custom-roles', data=payload)
+        return jsonify(data), 201
+    except Exception as e:
+        logger.error(f"GreenLake custom role create error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/reporting/top-aps-by-wireless-usage', methods=['GET'])

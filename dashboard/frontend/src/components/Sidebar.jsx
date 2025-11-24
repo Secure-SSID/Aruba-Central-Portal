@@ -108,6 +108,7 @@ const menuGroups = [
       { text: 'Subscriptions', icon: <AssessmentIcon />, path: '/gl/subscriptions' },
       { text: 'Users', icon: <PeopleIcon />, path: '/gl/users' },
       { text: 'Roles', icon: <ShieldIcon />, path: '/gl/roles' },
+      { text: 'Permissions', icon: <SecurityIcon />, path: '/gl/permissions' },
     ],
   },
   {

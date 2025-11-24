@@ -49,6 +49,7 @@ const GLSubscriptionsPage = lazy(() => import('./pages/GLSubscriptionsPage'));
 const GLWorkspacesPage = lazy(() => import('./pages/GLWorkspacesPage'));
 const GLUsersPage = lazy(() => import('./pages/GLUsersPage'));
 const GLRolesPage = lazy(() => import('./pages/GLRolesPage'));
+const GLPermissionsPage = lazy(() => import('./pages/GLPermissionsPage'));
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -319,6 +320,7 @@ function App() {
                       <Route path="/gl/subscriptions" element={<GLSubscriptionsPage />} />
                       <Route path="/gl/users" element={<GLUsersPage />} />
                       <Route path="/gl/roles" element={<GLRolesPage />} />
+                      <Route path="/gl/permissions" element={<GLPermissionsPage />} />
                       <Route path="/gl/workspaces" element={<GLWorkspacesPage />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
