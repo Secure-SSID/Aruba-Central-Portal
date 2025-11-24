@@ -134,7 +134,7 @@ TEST_CONFIGS = [
             "securityLevel": "Personal",
             "authType": "WPA2-Personal",
             "passphrase": "TestPassword123!",
-            "vlanId": "1",
+            "vlanId": "2",  # Use VLAN 2 (configured on gateway)
             "forwardMode": "FORWARD_MODE_L2",  # L2 Tunnel mode
             "gatewaySerial": "",  # Will be filled with actual gateway
             "gatewayName": "",
@@ -154,7 +154,7 @@ TEST_CONFIGS = [
             "securityLevel": "Personal",
             "authType": "WPA3-Personal",
             "passphrase": "TestPassword123!",
-            "vlanId": "1",
+            "vlanId": "2",  # Use VLAN 2 (configured on gateway)
             "forwardMode": "FORWARD_MODE_L2",  # L2 Tunnel mode
             "gatewaySerial": "",  # Will be filled with actual gateway
             "gatewayName": "",
