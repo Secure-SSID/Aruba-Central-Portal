@@ -203,14 +203,10 @@ def create_wlan_via_wizard(config, timestamp, session_id, gateway=None):
     wizard_data['wlanName'] = wlan_name
     wizard_data['ssidBroadcastName'] = ssid_name
 
-    # DEBUG: Print gateway info
-    console.print(f"[dim]DEBUG: Gateway object: {gateway}[/dim]")
-    console.print(f"[dim]DEBUG: Forward mode: {wizard_data.get('forwardMode')}[/dim]")
-
+    # For tunnel mode, track gateway info (used for display only - not added to API payload)
     if gateway and wizard_data.get('forwardMode') == 'FORWARD_MODE_L2':
         wizard_data['gatewaySerial'] = gateway.get('serialNumber', gateway.get('serial', ''))
         wizard_data['gatewayName'] = gateway.get('deviceName', gateway.get('name', ''))
-        console.print(f"[dim]DEBUG: Added gateway serial to wizard_data: {wizard_data['gatewaySerial']}[/dim]")
 
     result = {
         'config': config['description'],
@@ -315,16 +311,12 @@ def create_wlan_via_wizard(config, timestamp, session_id, gateway=None):
         if wizard_data['authType'] == 'WPA2/WPA3-Personal':
             wlan_config['wpa3-transition-mode-enable'] = True
 
-        # Add gateway for tunnel mode
-        console.print(f"[dim]DEBUG: Checking gateway assignment - forwardMode={wizard_data['forwardMode']}, gatewaySerial={wizard_data.get('gatewaySerial')}[/dim]")
+        # NOTE: Tunnel mode WLANs do NOT require a gateway field in the API payload
+        # They are created as SHARED (global) objects and Central automatically assigns them to available gateways
         if wizard_data['forwardMode'] == 'FORWARD_MODE_L2' and wizard_data.get('gatewaySerial'):
-            wlan_config['gateway'] = wizard_data['gatewaySerial']
-            console.print(f"[dim]Using gateway: {wizard_data['gatewayName']} ({wizard_data['gatewaySerial']})[/dim]")
-            console.print(f"[dim]DEBUG: Gateway field added to wlan_config[/dim]")
-        else:
-            console.print(f"[dim]DEBUG: Gateway NOT added - forwardMode is L2: {wizard_data['forwardMode'] == 'FORWARD_MODE_L2'}, has gatewaySerial: {bool(wizard_data.get('gatewaySerial'))}[/dim]")
+            console.print(f"[dim]Tunnel mode WLAN will be assigned to gateway: {wizard_data['gatewayName']} ({wizard_data['gatewaySerial']})[/dim]")
+            console.print(f"[dim](Gateway assignment happens automatically via Central - no gateway field needed in API)[/dim]")
 
-        console.print(f"[dim]DEBUG: Final wlan_config keys: {list(wlan_config.keys())}[/dim]")
         console.print(f"[dim]Creating WLAN {wlan_name}...[/dim]")
 
         wlan_response = requests.post(

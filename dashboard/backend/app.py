@@ -800,7 +800,7 @@ def create_wlan_config(ssid_name):
         params = request.args.to_dict()  # Get query parameters
         logger.info(f"Creating WLAN {ssid_name} with data: {wlan_data}")
         logger.info(f"Query parameters: {params}")
-        response = aruba_client.post(f'/network-config/v1alpha1/wlan-ssids/{ssid_name}', json=wlan_data)
+        response = aruba_client.post(f'/network-config/v1alpha1/wlan-ssids/{ssid_name}', data=wlan_data, params=params)
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error creating WLAN {ssid_name}: {e}")
@@ -3983,6 +3983,20 @@ def greenlake_update_tag(tag_id):
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake update tag error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/greenlake/tags/<tag_id>', methods=['DELETE'])
+@require_session
+def greenlake_delete_tag(tag_id):
+    """Delete a tag from GreenLake."""
+    try:
+        client = _get_greenlake_client()
+        if not client:
+            return jsonify({"error": "GreenLake RBAC not configured"}), 400
+        data = client.delete(f'/tags/v1/tags/{tag_id}')
+        return jsonify({"message": "Tag deleted successfully"})
+    except Exception as e:
+        logger.error(f"GreenLake delete tag error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/greenlake/subscriptions', methods=['GET'])
