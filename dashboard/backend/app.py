@@ -828,6 +828,18 @@ def update_wlan_config(ssid_name):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/config/wlan/<ssid_name>', methods=['DELETE'])
+@require_session
+def delete_wlan_config(ssid_name):
+    """Delete a WLAN."""
+    try:
+        response = aruba_client.delete(f'/network-config/v1alpha1/wlan-ssids/{ssid_name}')
+        return jsonify({"message": f"WLAN {ssid_name} deleted successfully"}), 200
+    except Exception as e:
+        logger.error(f"Error deleting WLAN {ssid_name}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # VLAN Configuration Endpoints
 @app.route('/api/config/vlan', methods=['GET'])
 @require_session
@@ -5749,7 +5761,7 @@ def get_gateway_tunnels(serial):
 @require_session
 def get_gateway_temperature(serial):
     """Get hardware temperature information for a gateway.
-    
+
     NOTE: This endpoint path is inferred from existing patterns. The actual Aruba Central API endpoint may differ.
     According to some documentation, gateways may have hardware-temperature-trends endpoints, but this needs verification.
     """
@@ -5774,6 +5786,58 @@ def get_gateway_temperature(serial):
                 "suggestion": "Check the gateway details endpoint or verify the correct endpoint path in Aruba Central API documentation."
             }), 404
         return jsonify({"error": error_str}), 500
+
+
+@app.route('/api/monitoring/gateways/<serial>/vlans', methods=['GET'])
+@require_session
+def get_gateway_vlans(serial):
+    """Get VLANs configured on a gateway.
+
+    This endpoint is used to fetch available VLANs for tunnel mode WLAN configuration.
+    Only VLANs that exist on the gateway can be used for L2 tunnel mode WLANs.
+
+    Uses the correct API endpoint: /network-config/v1alpha1/layer2-vlan (singular)
+    Response format: {"l2-vlan": [{"vlan-id": 200, "vlan-name": "Corporate", ...}, ...]}
+    """
+    try:
+        # Use the correct endpoint - singular 'layer2-vlan'
+        logger.info(f"Fetching VLANs for gateway {serial} using layer2-vlan endpoint")
+        response = aruba_client.get('/network-config/v1alpha1/layer2-vlan')
+
+        # Debug: Log the raw response to see actual structure
+        logger.info(f"Raw API response: {response}")
+
+        # The response has format: {"l2-vlan": [...]}
+        if 'l2-vlan' in response:
+            # Debug: Log first VLAN object to see field names
+            if len(response['l2-vlan']) > 0:
+                logger.info(f"Sample VLAN object: {response['l2-vlan'][0]}")
+
+            # Transform to frontend-expected format
+            vlans = []
+            for vlan in response['l2-vlan']:
+                # The API returns 'vlan' (not 'vlan-id') and 'name'
+                vlan_id = vlan.get('vlan')
+                vlan_name = vlan.get('name', f"VLAN {vlan_id}" if vlan_id else "Unknown")
+
+                vlans.append({
+                    'id': vlan_id,
+                    'name': vlan_name
+                })
+            logger.info(f"Successfully fetched {len(vlans)} VLANs: {[v['id'] for v in vlans]}")
+            return jsonify({'vlans': vlans})
+        else:
+            logger.warning("Unexpected response format - no 'l2-vlan' key found")
+            return jsonify({'vlans': []})
+
+    except Exception as e:
+        error_str = str(e)
+        logger.error(f"Error fetching VLANs: {error_str}")
+        return jsonify({
+            "error": "Unable to fetch gateway VLANs",
+            "message": error_str,
+            "vlans": []  # Return empty array so wizard doesn't break
+        }), 500
 
 
 # Device Monitoring (Generic)

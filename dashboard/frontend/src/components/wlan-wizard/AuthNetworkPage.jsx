@@ -34,6 +34,7 @@ import {
   CheckCircle as CheckIcon,
   Error as ErrorIcon,
   Help as HelpIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 import { validatePassphrase, validateVLANID, validateVLANName } from '../../utils/wlanValidation';
 import { SECURITY_LEVEL_OPTIONS, AUTH_TYPE_OPTIONS_BY_LEVEL, AUTH_TYPE_OPTIONS } from '../../utils/wlanTemplates';
@@ -51,6 +52,8 @@ const AuthNetworkPage = ({ data, onUpdate }) => {
   const [createVLANDialogOpen, setCreateVLANDialogOpen] = useState(false);
   const [gateways, setGateways] = useState([]);
   const [loadingGateways, setLoadingGateways] = useState(false);
+  const [gatewayVlans, setGatewayVlans] = useState([]);
+  const [loadingGatewayVlans, setLoadingGatewayVlans] = useState(false);
 
   // Check VLAN existence when VLAN ID changes
   useEffect(() => {
@@ -87,11 +90,67 @@ const AuthNetworkPage = ({ data, onUpdate }) => {
 
       console.log('Normalized gateways:', normalized);
       setGateways(normalized);
+
+      // Auto-select first gateway if none selected
+      if (normalized.length > 0 && !data.gatewaySerial) {
+        onUpdate({
+          gatewaySerial: normalized[0].serial,
+          gatewayName: normalized[0].name
+        });
+      }
     } catch (error) {
       console.error('Error fetching gateways:', error);
       setGateways([]);
     } finally {
       setLoadingGateways(false);
+    }
+  };
+
+  // Fetch VLANs when gateway is selected for tunnel mode
+  useEffect(() => {
+    if (data.forwardMode === 'FORWARD_MODE_L2' && data.gatewaySerial) {
+      fetchGatewayVlans(data.gatewaySerial);
+    }
+  }, [data.gatewaySerial, data.forwardMode]);
+
+  const fetchGatewayVlans = async (gatewaySerial) => {
+    try {
+      setLoadingGatewayVlans(true);
+      setGatewayVlans([]);
+
+      const response = await monitoringAPIv2.getGatewayVlans(gatewaySerial);
+      console.log('Gateway VLANs API response:', response);
+
+      // Extract VLAN IDs from response
+      // Response format may vary - handle common structures
+      let vlanList = [];
+
+      if (response.vlans && Array.isArray(response.vlans)) {
+        vlanList = response.vlans;
+      } else if (response['layer2-vlans'] && Array.isArray(response['layer2-vlans'])) {
+        vlanList = response['layer2-vlans'];
+      } else if (Array.isArray(response)) {
+        vlanList = response;
+      }
+
+      // Extract VLAN IDs
+      const vlans = vlanList.map(v => ({
+        id: v.vlan_id || v['vlan-id'] || v.id || v,
+        name: v.name || v.vlan_name || v['vlan-name'] || `VLAN ${v.vlan_id || v.id || v}`,
+      })).filter(v => v.id != null);  // Filter out invalid VLANs
+
+      console.log('Parsed gateway VLANs:', vlans);
+      setGatewayVlans(vlans);
+
+      // If no VLAN selected yet and VLANs available, auto-select first one
+      if (vlans.length > 0 && (!data.vlanId || data.vlanId === '')) {
+        onUpdate({ vlanId: String(vlans[0].id), vlanExists: true });
+      }
+    } catch (error) {
+      console.error('Error fetching gateway VLANs:', error);
+      setGatewayVlans([]);
+    } finally {
+      setLoadingGatewayVlans(false);
     }
   };
 
@@ -413,61 +472,8 @@ const AuthNetworkPage = ({ data, onUpdate }) => {
           Network Configuration
         </Typography>
 
-        {/* VLAN ID */}
-        <TextField
-          fullWidth
-          type="text"
-          label="VLAN ID"
-          value={data.vlanId}
-          onChange={handleVLANIDChange}
-          required
-          error={!!errors.vlanId}
-          helperText={errors.vlanId || "VLAN ID (1-4094)"}
-          sx={{ mt: 2 }}
-          inputProps={{ inputMode: 'numeric', pattern: '[0-9]*' }}
-          InputProps={{
-            endAdornment: checkingVLAN ? (
-              <InputAdornment position="end">
-                <CircularProgress size={20} />
-              </InputAdornment>
-            ) : vlanCheckResult ? (
-              <InputAdornment position="end">
-                {vlanCheckResult.exists ? (
-                  <CheckIcon color="success" />
-                ) : (
-                  <ErrorIcon color="warning" />
-                )}
-              </InputAdornment>
-            ) : null,
-          }}
-        />
-
-        {/* VLAN Status */}
-        {vlanCheckResult && !checkingVLAN && (
-          <Box sx={{ mt: 1 }}>
-            {vlanCheckResult.exists ? (
-              <Alert severity="success" icon={<CheckIcon />}>
-                VLAN {data.vlanId} exists: <strong>{vlanCheckResult.name}</strong>
-              </Alert>
-            ) : vlanCheckResult.error ? (
-              <Alert severity="error">{vlanCheckResult.error}</Alert>
-            ) : (
-              <Alert
-                severity="warning"
-                action={
-                  <Button color="inherit" size="small" onClick={handleCreateVLAN}>
-                    Create VLAN
-                  </Button>
-                }
-              >
-                VLAN {data.vlanId} doesn't exist. You can create it now or the wizard will create it automatically.
-              </Alert>
-            )}
-          </Box>
-        )}
-
-        {/* Forward Mode (Bridged vs Tunneled) */}
-        <FormControl fullWidth sx={{ mt: 3 }}>
+        {/* Forward Mode (Bridged vs Tunneled) - MOVED TO TOP */}
+        <FormControl fullWidth sx={{ mt: 2 }}>
           <InputLabel>Traffic Forwarding Mode</InputLabel>
           <Select
             value={data.forwardMode || 'FORWARD_MODE_BRIDGE'}
@@ -493,13 +499,14 @@ const AuthNetworkPage = ({ data, onUpdate }) => {
           </Select>
         </FormControl>
 
-        {/* Gateway Selection - Only shown for tunnel mode */}
+        {/* Gateway Selection - Only shown for tunnel mode - MOVED BEFORE VLAN */}
         {data.forwardMode === 'FORWARD_MODE_L2' && (
           <FormControl fullWidth sx={{ mt: 2 }}>
             <InputLabel>Select Gateway</InputLabel>
             <Select
               value={data.gatewaySerial || ''}
               label="Select Gateway"
+              disabled={loadingGateways}
               onChange={(e) => {
                 const selectedGateway = gateways.find(gw => gw.serial === e.target.value);
                 console.log('Selected gateway:', selectedGateway);
@@ -508,32 +515,129 @@ const AuthNetworkPage = ({ data, onUpdate }) => {
                   gatewayName: selectedGateway?.name || '',
                 });
               }}
-              disabled={loadingGateways}
               required
             >
-              {loadingGateways ? (
-                <MenuItem disabled>
-                  <CircularProgress size={20} sx={{ mr: 1 }} />
-                  Loading gateways...
+              {gateways.map((gateway) => (
+                <MenuItem key={gateway.serial} value={gateway.serial}>
+                  {gateway.name} ({gateway.serial})
                 </MenuItem>
-              ) : gateways.length === 0 ? (
-                <MenuItem disabled>No gateways available</MenuItem>
-              ) : (
-                gateways.map((gateway) => (
-                  <MenuItem key={gateway.serial} value={gateway.serial}>
-                    <Box>
-                      <Typography variant="body2" component="div" fontWeight="medium">
-                        {gateway.name || gateway.hostname || gateway.serial}
-                      </Typography>
-                      <Typography variant="caption" component="div" color="text.secondary">
-                        {gateway.model} • {gateway.ip_address} • {gateway.status}
-                      </Typography>
-                    </Box>
-                  </MenuItem>
-                ))
-              )}
+              ))}
             </Select>
+            {loadingGateways && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 2 }}>
+                Loading gateways...
+              </Typography>
+            )}
+            {!loadingGateways && gateways.length === 0 && (
+              <Alert severity="warning" sx={{ mt: 1 }}>
+                No gateways found. Please ensure you have gateway devices configured.
+              </Alert>
+            )}
           </FormControl>
+        )}
+
+        {/* VLAN ID - Show dropdown for tunnel mode if VLANs found, otherwise text field */}
+        {data.forwardMode === 'FORWARD_MODE_L2' && data.gatewaySerial && gatewayVlans.length > 0 && !loadingGatewayVlans ? (
+          // Gateway VLANs available - show dropdown
+          <FormControl fullWidth sx={{ mt: 2 }} required error={!!errors.vlanId}>
+            <InputLabel>VLAN ID (from Gateway)</InputLabel>
+            <Select
+              value={data.vlanId || ''}
+              label="VLAN ID (from Gateway)"
+              onChange={(e) => onUpdate({ vlanId: e.target.value, vlanExists: true })}
+            >
+              {gatewayVlans.map((vlan) => (
+                <MenuItem key={vlan.id} value={String(vlan.id)}>
+                  VLAN {vlan.id} - {vlan.name}
+                </MenuItem>
+              ))}
+            </Select>
+            <Typography variant="caption" color="success.main" sx={{ mt: 0.5, ml: 2 }}>
+              ✓ Showing VLANs configured on the selected gateway
+            </Typography>
+          </FormControl>
+        ) : data.forwardMode === 'FORWARD_MODE_L2' && data.gatewaySerial ? (
+          // Tunnel mode but no VLANs found - show text field with warning
+          <>
+            <TextField
+              fullWidth
+              type="text"
+              label="VLAN ID (Manual Entry)"
+              value={data.vlanId}
+              onChange={handleVLANIDChange}
+              required
+              error={!!errors.vlanId}
+              helperText={errors.vlanId || "Enter VLAN ID (1-4094)"}
+              sx={{ mt: 2 }}
+              inputProps={{ inputMode: 'numeric', pattern: '[0-9]*' }}
+              InputProps={{
+                startAdornment: loadingGatewayVlans ? (
+                  <InputAdornment position="start">
+                    <CircularProgress size={20} />
+                  </InputAdornment>
+                ) : null,
+              }}
+            />
+            <Alert severity="warning" icon={<WarningIcon />} sx={{ mt: 1 }}>
+              <strong>Important:</strong> For tunnel mode, the VLAN must be pre-configured on gateway <strong>{data.gatewayName || data.gatewaySerial}</strong>.
+              If the VLAN doesn't exist, WLAN creation will fail with error "L2-VLAN:X is not configured".
+            </Alert>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 2, display: 'block' }}>
+              💡 Tip: Configure VLANs on your gateway in Aruba Central before creating tunnel mode WLANs
+            </Typography>
+          </>
+        ) : (
+          <TextField
+            fullWidth
+            type="text"
+            label="VLAN ID"
+            value={data.vlanId}
+            onChange={handleVLANIDChange}
+            required
+            error={!!errors.vlanId}
+            helperText={errors.vlanId || "VLAN ID (1-4094)"}
+            sx={{ mt: 2 }}
+            inputProps={{ inputMode: 'numeric', pattern: '[0-9]*' }}
+            InputProps={{
+              endAdornment: checkingVLAN ? (
+                <InputAdornment position="end">
+                  <CircularProgress size={20} />
+                </InputAdornment>
+              ) : vlanCheckResult ? (
+                <InputAdornment position="end">
+                  {vlanCheckResult.exists ? (
+                    <CheckIcon color="success" />
+                  ) : (
+                    <ErrorIcon color="warning" />
+                  )}
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+        )}
+
+        {/* VLAN Status */}
+        {vlanCheckResult && !checkingVLAN && (
+          <Box sx={{ mt: 1 }}>
+            {vlanCheckResult.exists ? (
+              <Alert severity="success" icon={<CheckIcon />}>
+                VLAN {data.vlanId} exists: <strong>{vlanCheckResult.name}</strong>
+              </Alert>
+            ) : vlanCheckResult.error ? (
+              <Alert severity="error">{vlanCheckResult.error}</Alert>
+            ) : (
+              <Alert
+                severity="warning"
+                action={
+                  <Button color="inherit" size="small" onClick={handleCreateVLAN}>
+                    Create VLAN
+                  </Button>
+                }
+              >
+                VLAN {data.vlanId} doesn't exist. You can create it now or the wizard will create it automatically.
+              </Alert>
+            )}
+          </Box>
         )}
       </Paper>
 

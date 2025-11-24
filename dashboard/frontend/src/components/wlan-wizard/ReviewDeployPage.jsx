@@ -292,19 +292,20 @@ const ReviewDeployPage = ({ data, onSuccess }) => {
 
       setCreatedResources(resources);
 
-      // Step 3: Assign WLAN to scope (if site-specific and bridged mode)
-      // Note: Tunneled WLANs typically work better as global (SHARED) without scope assignment
-      if (data.scopeType === 'site' && data.scopeId && !isTunneled) {
+      // Step 3: Assign WLAN to scope (if site-specific)
+      // For tunnel mode, use CAMPUS_AP persona for wlan-ssids resource
+      if (data.scopeType === 'site' && data.scopeId) {
         try {
           updateStepStatus('scope-wlan', 'in-progress');
 
-          // Assign WLAN to scope using scope-map API
+          // For WLAN assignment, always use CAMPUS_AP persona
+          // (even for tunnel mode - the MOBILITY_GW persona is for gateway resources)
           const scopeMapData = {
             'scope-map': [
               {
                 'scope-name': data.scopeId.toString(),
                 'scope-id': parseInt(data.scopeId),
-                'persona': devicePersona,
+                'persona': 'CAMPUS_AP',  // Always CAMPUS_AP for wlan-ssids
                 'resource': `wlan-ssids/${data.wlanName}`
               }
             ]
@@ -312,15 +313,13 @@ const ReviewDeployPage = ({ data, onSuccess }) => {
 
           await configAPI.scopeMaps.createScopeMap(scopeMapData);
           updateStepStatus('scope-wlan', 'completed');
+          console.log(`Assigned WLAN to site ${data.scopeName} (${data.scopeId})`);
         } catch (error) {
           updateStepStatus('scope-wlan', 'error', error.message);
           // Don't throw - WLAN is created, just not scoped
           console.warn('Failed to assign WLAN to scope:', error);
           console.warn('WLAN will broadcast globally instead');
         }
-      } else if (isTunneled) {
-        // Tunneled WLANs broadcast globally - no scope assignment
-        console.log('Tunneled WLAN deployment - WLAN will broadcast globally');
       } else {
         // Global deployment - no scope assignment needed
         console.log('Global deployment - WLAN will broadcast on all APs');

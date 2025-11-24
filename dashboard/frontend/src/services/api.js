@@ -735,8 +735,8 @@ export const configAPI = {
      * Example:
      * {
      *   "scope-map": [{
-     *     "scope-name": "54819475093",
-     *     "scope-id": 54819475093,
+     *     "scope-name": "12345678901",
+     *     "scope-id": 12345678901,
      *     "persona": "CAMPUS_AP",
      *     "resource": "wlan-ssids/MyWLAN"
      *   }]
@@ -1700,6 +1700,11 @@ export const monitoringAPIv2 = {
 
   getGatewayTunnels: async (serial) => {
     const response = await apiClient.get(`/monitoring/gateways/${serial}/tunnels`);
+    return response.data;
+  },
+
+  getGatewayVlans: async (serial) => {
+    const response = await apiClient.get(`/monitoring/gateways/${serial}/vlans`);
     return response.data;
   },
 
