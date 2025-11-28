@@ -4746,6 +4746,126 @@ def get_top_ssids_by_usage():
         return jsonify({"items": [], "count": 0})
 
 
+@app.route('/api/reporting/devices-with-greenlake', methods=['GET'])
+@require_session
+def get_devices_with_greenlake():
+    """Get All Devices enriched with GreenLake device data.
+
+    Fetches devices from Aruba Central monitoring API and enriches with
+    additional fields from GreenLake Device Management API by matching
+    on serial number. Includes all device types: APs, switches, gateways, etc.
+    """
+    try:
+        # Fetch all devices from Aruba Central monitoring API
+        # Use the same endpoint as the "All Devices" report
+        devices = []
+        try:
+            # Try network-monitoring v1alpha1 first (preferred)
+            devices_response = aruba_client.get('/network-monitoring/v1alpha1/devices')
+            devices = devices_response.get('items', devices_response.get('devices', []))
+            if devices:
+                logger.info(f"Fetched {len(devices)} devices from network-monitoring/v1alpha1/devices")
+        except Exception as e:
+            logger.warning(f"Failed to fetch devices from network-monitoring API: {e}")
+            # Fallback to monitoring/v1 API
+            try:
+                devices_response = aruba_client.get('/monitoring/v1/devices')
+                devices = devices_response.get('items', devices_response.get('devices', []))
+                if devices:
+                    logger.info(f"Fetched {len(devices)} devices from monitoring/v1/devices (fallback)")
+            except Exception as e2:
+                logger.warning(f"Failed to fetch devices from monitoring/v1 API: {e2}")
+
+        if not devices:
+            logger.warning("No devices found from any API endpoint")
+            return jsonify({"items": [], "count": 0, "message": "No devices found"})
+
+        # Try to fetch GreenLake devices
+        gl_devices = {}
+        try:
+            gl_client = _get_greenlake_client()
+            if gl_client:
+                gl_response = gl_client.get('/devices/v1/devices')
+                gl_items = gl_response.get('items', [])
+                # Index by serial number for fast lookup
+                for gl_device in gl_items:
+                    serial = gl_device.get('serialNumber') or gl_device.get('serial')
+                    if serial:
+                        gl_devices[serial.upper()] = gl_device
+                logger.info(f"Fetched {len(gl_devices)} GreenLake devices for enrichment")
+        except Exception as e:
+            logger.warning(f"GreenLake devices not available for enrichment: {e}")
+
+        # Merge device data with GreenLake data
+        enriched_devices = []
+        matched_count = 0
+
+        # Debug: Log device serials and GreenLake serials
+        logger.info(f"Central device serials: {[d.get('serial') for d in devices[:3]]}")
+        logger.info(f"GreenLake serials available: {list(gl_devices.keys())[:5]}")
+
+        for device in devices:
+            # Try multiple field names for serial number
+            serial = device.get('serial') or device.get('serialNumber') or device.get('device_id') or ''
+            serial_upper = serial.upper() if serial else ''
+
+            enriched_device = {
+                # Device fields from Aruba Central
+                'name': device.get('name'),
+                'serial': device.get('serial'),
+                'deviceType': device.get('deviceType') or device.get('device_type'),
+                'macAddress': device.get('macaddr') or device.get('macAddress'),
+                'model': device.get('model'),
+                'status': device.get('status'),
+                'ipAddress': device.get('ip_address') or device.get('ipAddress'),
+                'site': device.get('site') or device.get('siteName'),
+                'group': device.get('group') or device.get('groupName'),
+                'firmwareVersion': device.get('firmware_version') or device.get('firmwareVersion'),
+                'clientCount': device.get('client_count') or device.get('clientCount'),
+                'cpuUtilization': device.get('cpu_utilization') or device.get('cpuUtilization'),
+                'memoryUtilization': device.get('mem_utilization') or device.get('memoryUtilization'),
+                'uptime': device.get('uptime'),
+                'lastSeen': device.get('last_seen') or device.get('lastSeen'),
+                'labels': device.get('labels', []),
+            }
+
+            # Enrich with GreenLake data if available
+            if serial_upper and serial_upper in gl_devices:
+                matched_count += 1
+                gl = gl_devices[serial_upper]
+                enriched_device['gl_deviceId'] = gl.get('id') or gl.get('deviceId')
+                enriched_device['gl_partNumber'] = gl.get('partNumber')
+                enriched_device['gl_productId'] = gl.get('productId')
+                enriched_device['gl_subscriptionKey'] = gl.get('subscriptionKey')
+                enriched_device['gl_subscriptionTier'] = gl.get('subscriptionTier') or gl.get('tier')
+                enriched_device['gl_subscriptionExpiry'] = gl.get('subscriptionExpiresAt') or gl.get('expirationDate')
+                enriched_device['gl_cloudActivationKey'] = gl.get('cloudActivationKey') or gl.get('activationKey')
+                enriched_device['gl_applicationId'] = gl.get('applicationId') or gl.get('appId')
+                enriched_device['gl_applicationName'] = gl.get('applicationName') or gl.get('appName')
+                enriched_device['gl_platformCustomerId'] = gl.get('platformCustomerId')
+                enriched_device['gl_createdAt'] = gl.get('createdAt')
+                enriched_device['gl_updatedAt'] = gl.get('updatedAt')
+                enriched_device['gl_tags'] = gl.get('tags', [])
+                enriched_device['gl_matched'] = True
+            else:
+                enriched_device['gl_matched'] = False
+
+            enriched_devices.append(enriched_device)
+
+        # Sort by name
+        enriched_devices.sort(key=lambda x: (x.get('name') or '').lower())
+
+        return jsonify({
+            "items": enriched_devices,
+            "count": len(enriched_devices),
+            "gl_matched_count": sum(1 for d in enriched_devices if d.get('gl_matched')),
+            "gl_available": len(gl_devices) > 0
+        })
+    except Exception as e:
+        logger.error(f"Error fetching devices with GreenLake data: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ============= Services Endpoints =============
 
 @app.route('/api/services/health', methods=['GET'])

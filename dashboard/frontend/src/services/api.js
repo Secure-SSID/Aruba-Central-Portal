@@ -953,6 +953,46 @@ export const greenlakeRoleAPI = {
 };
 
 /**
+ * GreenLake Device API
+ */
+export const greenlakeDeviceAPI = {
+  list: async (params = {}) => {
+    const response = await apiClient.get('/greenlake/devices', { params });
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Tags API
+ */
+export const greenlakeTagsAPI = {
+  list: async () => {
+    const response = await apiClient.get('/greenlake/tags');
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Subscriptions API
+ */
+export const greenlakeSubscriptionsAPI = {
+  list: async (params = {}) => {
+    const response = await apiClient.get('/greenlake/subscriptions', { params });
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Workspaces API
+ */
+export const greenlakeWorkspacesAPI = {
+  list: async () => {
+    const response = await apiClient.get('/greenlake/workspaces');
+    return response.data;
+  },
+};
+
+/**
  * Monitoring API
  */
 export const monitoringAPI = {
@@ -1444,6 +1484,11 @@ export const reportingAPI = {
     const params = { count };
     if (siteId) params.site_id = siteId;
     const response = await apiClient.get('/reporting/top-aps-by-client-count', { params });
+    return response.data;
+  },
+
+  getDevicesWithGreenLake: async () => {
+    const response = await apiClient.get('/reporting/devices-with-greenlake');
     return response.data;
   },
 
