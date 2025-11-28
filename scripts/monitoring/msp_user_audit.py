@@ -9,14 +9,13 @@ in Aruba Central. It retrieves:
 """
 
 import sys
-import time
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from utils import ArubaClient, load_config
+from utils import CentralAPIClient, TokenManager, load_config
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -27,11 +26,11 @@ from requests.exceptions import HTTPError
 console = Console()
 
 
-def get_all_customers(client: ArubaClient, limit: int = 100) -> List[Dict[str, Any]]:
+def get_all_customers(client: CentralAPIClient, limit: int = 100) -> List[Dict[str, Any]]:
     """Retrieve all MSP customer/tenant accounts.
 
     Args:
-        client: Authenticated ArubaClient instance
+        client: Authenticated CentralAPIClient instance
         limit: Maximum number of customers per API call
 
     Returns:
@@ -66,11 +65,11 @@ def get_all_customers(client: ArubaClient, limit: int = 100) -> List[Dict[str, A
     return customers
 
 
-def get_customer_users(client: ArubaClient, customer_id: str) -> List[Dict[str, Any]]:
+def get_customer_users(client: CentralAPIClient, customer_id: str) -> List[Dict[str, Any]]:
     """Retrieve all users for a specific customer/tenant.
 
     Args:
-        client: Authenticated ArubaClient instance
+        client: Authenticated CentralAPIClient instance
         customer_id: Customer ID to query
 
     Returns:
@@ -85,11 +84,11 @@ def get_customer_users(client: ArubaClient, customer_id: str) -> List[Dict[str, 
         return []
 
 
-def get_user_roles(client: ArubaClient, customer_id: str, username: str) -> Dict[str, Any]:
+def get_user_roles(client: CentralAPIClient, customer_id: str, username: str) -> Dict[str, Any]:
     """Retrieve role information for a specific user.
 
     Args:
-        client: Authenticated ArubaClient instance
+        client: Authenticated CentralAPIClient instance
         customer_id: Customer ID
         username: Username to query
 
@@ -254,14 +253,14 @@ def main():
     config = load_config()
     aruba_config = config["aruba_central"]
 
-    # Initialize client
-    client = ArubaClient(
-        base_url=aruba_config["base_url"],
+    # Initialize token manager and client
+    token_manager = TokenManager(
         client_id=aruba_config["client_id"],
         client_secret=aruba_config["client_secret"],
-        customer_id=aruba_config["customer_id"],
-        username=aruba_config.get("username"),
-        password=aruba_config.get("password"),
+    )
+    client = CentralAPIClient(
+        base_url=aruba_config["base_url"],
+        token_manager=token_manager,
     )
 
     try:

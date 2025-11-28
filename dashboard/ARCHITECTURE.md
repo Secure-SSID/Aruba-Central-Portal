@@ -76,12 +76,13 @@
 │  └───────────────────────────────────────────────────────────┘  │
 │                            │                                     │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │              Aruba Client (from utils/)                   │  │
+│  │         CentralAPIClient + TokenManager (utils/)          │  │
 │  │                                                            │  │
-│  │  • OAuth 2.0 authentication                               │  │
-│  │  • Token caching (2-hour expiry)                          │  │
+│  │  • OAuth 2.0 client credentials via HPE SSO               │  │
+│  │  • Token caching (2-hour expiry, 5-min buffer)            │  │
 │  │  • Automatic token refresh                                │  │
-│  │  • HTTP methods: GET, POST, PUT, DELETE                   │  │
+│  │  • 429 retry with exponential backoff                     │  │
+│  │  • HTTP methods: GET, POST, PUT, PATCH, DELETE            │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                            │                                     │
 │                            │ HTTPS (OAuth 2.0)                   │
@@ -269,10 +270,10 @@ app.py (Flask Application)
 │   └── Session management
 │
 ├── Initialization
-│   └── init_aruba_client()
+│   └── init_central_client()
 │       ├── Load config (from utils/)
-│       ├── Create ArubaClient
-│       └── Load cached tokens
+│       ├── Create TokenManager + CentralAPIClient
+│       └── Token automatically cached/refreshed
 │
 ├── Middleware
 │   └── @require_session decorator

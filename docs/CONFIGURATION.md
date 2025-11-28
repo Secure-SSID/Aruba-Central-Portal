@@ -140,11 +140,20 @@ Best for service-to-service authentication. Requires:
 - `ARUBA_CUSTOMER_ID`
 
 ```python
-from utils import ArubaClient, load_config
+from utils import CentralAPIClient, TokenManager, load_config
 
 config = load_config()
-client = ArubaClient(**config["aruba_central"])
-# Authentication happens automatically on first API call
+aruba_config = config["aruba_central"]
+
+token_manager = TokenManager(
+    client_id=aruba_config["client_id"],
+    client_secret=aruba_config["client_secret"],
+)
+client = CentralAPIClient(
+    base_url=aruba_config["base_url"],
+    token_manager=token_manager,
+)
+# Authentication happens automatically via TokenManager
 response = client.get("/monitoring/v1/devices")
 ```
 
@@ -201,16 +210,13 @@ Location: `.token_cache.json` (in project root)
 
 ### Best Practices
 
-**Do NOT call `authenticate()` explicitly:**
+**Let TokenManager handle authentication automatically:**
 
 ```python
-# ❌ WRONG - Forces new authentication even with valid cache
-client = ArubaClient(...)
-client.authenticate()  # Don't do this!
-
-# ✅ CORRECT - Uses cached token automatically
-client = ArubaClient(...)
-response = client.get("/monitoring/v1/devices")  # Auth happens automatically if needed
+# ✅ CORRECT - TokenManager handles token refresh automatically
+token_manager = TokenManager(client_id=..., client_secret=...)
+client = CentralAPIClient(base_url=..., token_manager=token_manager)
+response = client.get("/monitoring/v1/devices")  # Token injected automatically
 ```
 
 ### Troubleshooting Token Issues
@@ -308,16 +314,25 @@ print(config)
 ### Test Authentication
 
 ```python
-from utils import ArubaClient, load_config
+from utils import CentralAPIClient, TokenManager, load_config
 
 config = load_config()
-client = ArubaClient(**config["aruba_central"])
+aruba_config = config["aruba_central"]
+
+token_manager = TokenManager(
+    client_id=aruba_config["client_id"],
+    client_secret=aruba_config["client_secret"],
+)
+client = CentralAPIClient(
+    base_url=aruba_config["base_url"],
+    token_manager=token_manager,
+)
 
 # Test API call
 try:
-    response = client.get("/platform/customer/v1/info")
+    response = client.get("/network-monitoring/v1alpha1/devices")
     print("Authentication successful!")
-    print(f"Customer: {response.get('customer_name')}")
+    print(f"Devices found: {response.get('count', 0)}")
 except Exception as e:
     print(f"Authentication failed: {e}")
 ```

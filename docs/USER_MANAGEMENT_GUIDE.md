@@ -10,7 +10,7 @@ The User Management script provides comprehensive tools for viewing and managing
 
 #### List All Users
 ```bash
-python3 scripts/user_management.py --list
+python3 scripts/users/user_management.py --list
 ```
 
 Displays a detailed table of all users including:
@@ -23,12 +23,12 @@ Displays a detailed table of all users including:
 
 #### View Specific User Details
 ```bash
-python3 scripts/user_management.py --user <username>
+python3 scripts/users/user_management.py --user <username>
 ```
 
 Example:
 ```bash
-python3 scripts/user_management.py --user user@example.com
+python3 scripts/users/user_management.py --user user@example.com
 ```
 
 Shows detailed information with a tree view of:
@@ -39,7 +39,7 @@ Shows detailed information with a tree view of:
 
 #### View Available Roles
 ```bash
-python3 scripts/user_management.py --roles
+python3 scripts/users/user_management.py --roles
 ```
 
 Attempts to retrieve system roles (may not be available in all API versions).
@@ -48,7 +48,7 @@ Attempts to retrieve system roles (may not be available in all API versions).
 
 Run without arguments for interactive menu:
 ```bash
-python3 scripts/user_management.py
+python3 scripts/users/user_management.py
 ```
 
 **Interactive Menu Options:**
@@ -113,14 +113,16 @@ Your Aruba Central instance currently has:
 To export all user data to JSON:
 ```bash
 # Interactive mode - choose option 4
-python3 scripts/user_management.py
+./venv/bin/python scripts/users/user_management.py
 
 # Or use Python API directly:
-python3 -c "
-from utils import ArubaClient, load_config
+./venv/bin/python -c "
+from utils import CentralAPIClient, TokenManager, load_config
 import json
 config = load_config()
-client = ArubaClient(**config['aruba_central'])
+aruba_config = config['aruba_central']
+token_manager = TokenManager(aruba_config['client_id'], aruba_config['client_secret'])
+client = CentralAPIClient(aruba_config['base_url'], token_manager)
 users = client.get('/platform/rbac/v1/users')
 with open('users_export.json', 'w') as f:
     json.dump(users, f, indent=2)
@@ -135,11 +137,13 @@ Output file: `users_export.json`
 ### Python Script Example
 
 ```python
-from utils import ArubaClient, load_config
+from utils import CentralAPIClient, TokenManager, load_config
 
 # Initialize client
 config = load_config()
-client = ArubaClient(**config["aruba_central"])
+aruba_config = config["aruba_central"]
+token_manager = TokenManager(aruba_config["client_id"], aruba_config["client_secret"])
+client = CentralAPIClient(aruba_config["base_url"], token_manager)
 
 # Get all users
 users = client.get("/platform/rbac/v1/users")

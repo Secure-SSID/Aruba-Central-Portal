@@ -50,6 +50,7 @@ const GLWorkspacesPage = lazy(() => import('./pages/GLWorkspacesPage'));
 const GLUsersPage = lazy(() => import('./pages/GLUsersPage'));
 const GLRolesPage = lazy(() => import('./pages/GLRolesPage'));
 const GLPermissionsPage = lazy(() => import('./pages/GLPermissionsPage'));
+const ReportingPage = lazy(() => import('./pages/ReportingPage'));
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -308,6 +309,7 @@ function App() {
                       <Route path="/nac" element={<NACPage />} />
                       <Route path="/alerts" element={<AlertsPage />} />
                       <Route path="/analytics" element={<AnalyticsPage />} />
+                      <Route path="/reporting" element={<ReportingPage />} />
                       <Route path="/firmware" element={<FirmwarePage />} />
                       <Route path="/troubleshoot" element={<TroubleshootPage />} />
                       <Route path="/network-monitor" element={<NetworkMonitorPage />} />

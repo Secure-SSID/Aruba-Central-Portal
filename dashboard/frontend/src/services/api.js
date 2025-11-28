@@ -953,6 +953,46 @@ export const greenlakeRoleAPI = {
 };
 
 /**
+ * GreenLake Device API
+ */
+export const greenlakeDeviceAPI = {
+  list: async (params = {}) => {
+    const response = await apiClient.get('/greenlake/devices', { params });
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Tags API
+ */
+export const greenlakeTagsAPI = {
+  list: async () => {
+    const response = await apiClient.get('/greenlake/tags');
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Subscriptions API
+ */
+export const greenlakeSubscriptionsAPI = {
+  list: async (params = {}) => {
+    const response = await apiClient.get('/greenlake/subscriptions', { params });
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Workspaces API
+ */
+export const greenlakeWorkspacesAPI = {
+  list: async () => {
+    const response = await apiClient.get('/greenlake/workspaces');
+    return response.data;
+  },
+};
+
+/**
  * Monitoring API
  */
 export const monitoringAPI = {
@@ -1444,6 +1484,23 @@ export const reportingAPI = {
     const params = { count };
     if (siteId) params.site_id = siteId;
     const response = await apiClient.get('/reporting/top-aps-by-client-count', { params });
+    return response.data;
+  },
+
+  /**
+   * Get all devices enriched with GreenLake subscription data.
+   * Matches devices by serial number to include license and subscription info.
+   *
+   * @returns {Promise<Object>} Object with:
+   *   - items: Array of device objects with gl_* prefixed GreenLake fields
+   *   - count: Total number of devices
+   *   - gl_matched_count: Number of devices with GreenLake data
+   *   - gl_available: Boolean indicating if GreenLake data was fetched
+   *   - gl_error: Error message if GreenLake enrichment failed (optional)
+   *   - warnings: Array of warnings about fallback behavior (optional)
+   */
+  getDevicesWithGreenLake: async () => {
+    const response = await apiClient.get('/reporting/devices-with-greenlake');
     return response.data;
   },
 

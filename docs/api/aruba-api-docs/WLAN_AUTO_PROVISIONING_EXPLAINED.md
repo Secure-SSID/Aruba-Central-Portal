@@ -133,7 +133,7 @@ From [Aruba Central NetConductor](https://central.wifidownunder.com/documentatio
 Created verification script to check if WLAN has been deployed to APs:
 
 ```bash
-python scripts/verify_wlan_deployment.py <wlan_name>
+python scripts/network/wlan/verify_wlan_deployment.py <wlan_name>
 ```
 
 **What it checks:**
@@ -307,7 +307,7 @@ Status: Deploying... (3/5 APs)
 
 5. **Run verification script**:
    ```bash
-   python scripts/verify_wlan_deployment.py test-auto-provision-001
+   python scripts/network/wlan/verify_wlan_deployment.py test-auto-provision-001
    ```
 
 6. **Expected result**:

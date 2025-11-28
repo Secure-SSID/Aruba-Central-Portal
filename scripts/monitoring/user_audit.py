@@ -6,14 +6,13 @@ Works with both regular tenant accounts and MSP accounts.
 """
 
 import sys
-import time
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from utils import ArubaClient, load_config
+from utils import CentralAPIClient, TokenManager, load_config
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -24,11 +23,11 @@ from requests.exceptions import HTTPError
 console = Console()
 
 
-def check_account_type(client: ArubaClient) -> str:
+def check_account_type(client: CentralAPIClient) -> str:
     """Determine if this is an MSP account or regular tenant account.
 
     Args:
-        client: Authenticated ArubaClient instance
+        client: Authenticated CentralAPIClient instance
 
     Returns:
         "msp" if MSP account, "tenant" if regular account
@@ -44,11 +43,11 @@ def check_account_type(client: ArubaClient) -> str:
             raise
 
 
-def get_tenant_users(client: ArubaClient) -> List[Dict[str, Any]]:
+def get_tenant_users(client: CentralAPIClient) -> List[Dict[str, Any]]:
     """Retrieve all users for the current tenant account.
 
     Args:
-        client: Authenticated ArubaClient instance
+        client: Authenticated CentralAPIClient instance
 
     Returns:
         List of user dictionaries
@@ -61,11 +60,11 @@ def get_tenant_users(client: ArubaClient) -> List[Dict[str, Any]]:
         return []
 
 
-def get_user_details(client: ArubaClient, username: str) -> Dict[str, Any]:
+def get_user_details(client: CentralAPIClient, username: str) -> Dict[str, Any]:
     """Retrieve detailed information for a specific user.
 
     Args:
-        client: Authenticated ArubaClient instance
+        client: Authenticated CentralAPIClient instance
         username: Username to query
 
     Returns:
@@ -193,14 +192,14 @@ def main():
     config = load_config()
     aruba_config = config["aruba_central"]
 
-    # Initialize client
-    client = ArubaClient(
-        base_url=aruba_config["base_url"],
+    # Initialize token manager and client
+    token_manager = TokenManager(
         client_id=aruba_config["client_id"],
         client_secret=aruba_config["client_secret"],
-        customer_id=aruba_config["customer_id"],
-        username=aruba_config.get("username"),
-        password=aruba_config.get("password"),
+    )
+    client = CentralAPIClient(
+        base_url=aruba_config["base_url"],
+        token_manager=token_manager,
     )
 
     try:

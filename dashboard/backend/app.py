@@ -716,10 +716,86 @@ def get_access_points(): pass
 @app.route('/api/wlans', methods=['GET'])
 @require_session
 def get_wlans():
-    """Get all WLANs using new v1alpha1 API."""
+    """Get all WLANs with full configuration using network-config API.
+
+    Uses /network-config/v1alpha1/wlan-ssids which returns comprehensive
+    configuration data for all WLANs in a single call, including:
+    - SSID name, description, enabled status
+    - Forward mode (bridge/tunnel), RF band, VLAN settings
+    - Security settings, 802.11k/r/v, captive portal
+    - High-throughput, WMM, and advanced radio settings
+    """
     try:
-        response = aruba_client.get('/network-monitoring/v1alpha1/wlans')
-        return jsonify(response)
+        response = aruba_client.get('/network-config/v1alpha1/wlan-ssids')
+
+        # Transform response to a consistent format for frontend
+        wlans = []
+        wlan_list = response.get('wlan-ssid', [])
+
+        def to_bool(value):
+            """Convert API value to boolean - handles bool, string, or None."""
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() == 'true'
+            return False
+
+        for wlan in wlan_list:
+            # Extract key fields into a flattened structure for easy display
+            essid = wlan.get('essid', {})
+            transformed = {
+                # Basic info
+                'ssid': wlan.get('ssid') or essid.get('name', 'Unknown'),
+                'essidName': essid.get('name', ''),
+                'essidAlias': essid.get('alias', ''),
+                'description': wlan.get('description', ''),
+                'enabled': to_bool(wlan.get('enable', False)),
+
+                # Network settings
+                'forwardMode': wlan.get('forward-mode', 'FORWARD_MODE_BRIDGE'),
+                'rfBand': wlan.get('rf-band', ''),
+                'hideSsid': to_bool(wlan.get('hide-ssid', False)),
+
+                # VLAN settings
+                'vlanSelector': wlan.get('vlan-selector', ''),
+                'vlanName': wlan.get('vlan-name', ''),
+                'vlanIdRange': wlan.get('vlan-id-range', []),
+
+                # Security
+                'opmode': wlan.get('opmode', ''),
+                'macAuthentication': to_bool(wlan.get('mac-authentication', False)),
+                'captivePortalType': wlan.get('captive-portal-type', ''),
+                'captivePortal': wlan.get('captive-portal', ''),
+                'wpa3TransitionMode': to_bool(wlan.get('wpa3-transition-mode-enable', False)),
+                'mfpCapable': to_bool(wlan.get('mfp-capable', False)),
+                'mfpRequired': to_bool(wlan.get('mfp-required', False)),
+
+                # 802.11 standards
+                'dot11k': to_bool(wlan.get('dot11k', False)),
+                'dot11r': to_bool(wlan.get('dot11r', False)),
+                'dot11v': to_bool(wlan.get('dot11v', False)),
+
+                # Client settings
+                'maxClientsThreshold': wlan.get('max-clients-threshold', '64'),
+                'inactivityTimeout': wlan.get('inactivity-timeout', '1000'),
+                'clientIsolation': to_bool(wlan.get('client-isolation', False)),
+                'denyInterUserBridging': to_bool(wlan.get('deny-inter-user-bridging', False)),
+
+                # Advanced
+                'bandwidthLimit': wlan.get('bandwidth-limit', ''),
+                'contentFiltering': to_bool(wlan.get('content-filtering', False)),
+                'enforceDhcp': to_bool(wlan.get('enforce-dhcp', False)),
+
+                # Keep raw config for detailed view/export
+                '_rawConfig': wlan
+            }
+            wlans.append(transformed)
+
+        return jsonify({
+            'wlans': wlans,
+            'count': len(wlans),
+            'metadata': response.get('metadata', {})
+        })
     except Exception as e:
         logger.error(f"Error fetching WLANs: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4668,6 +4744,158 @@ def get_top_ssids_by_usage():
     except Exception as e:
         logger.error(f"Error fetching top SSIDs by usage: {e}")
         return jsonify({"items": [], "count": 0})
+
+
+@app.route('/api/reporting/devices-with-greenlake', methods=['GET'])
+@require_session
+def get_devices_with_greenlake():
+    """Get All Devices enriched with GreenLake device data.
+
+    Fetches devices from Aruba Central monitoring API and enriches with
+    additional fields from GreenLake Device Management API by matching
+    on serial number. Includes all device types: APs, switches, gateways, etc.
+
+    Returns:
+        JSON object with:
+        - items: List of device objects with gl_* prefixed GreenLake fields
+        - count: Total number of devices
+        - gl_matched_count: Number of devices with GreenLake data
+        - gl_available: Boolean indicating if GreenLake data was fetched
+        - gl_error: Error message if GreenLake enrichment failed (optional)
+        - warnings: List of warnings about fallback behavior (optional)
+
+    Notes:
+        - Requires active session (X-Session-ID header)
+        - Gracefully handles API failures with fallback endpoints
+        - Each device has gl_matched boolean indicating GreenLake match status
+    """
+    from requests.exceptions import HTTPError, ConnectionError, Timeout
+
+    try:
+        warnings = []
+
+        # Fetch all devices from Aruba Central monitoring API
+        # Primary: network-monitoring/v1alpha1/devices, fallback: monitoring/v1/devices
+        devices = []
+        try:
+            # Try network-monitoring v1alpha1 first (preferred)
+            devices_response = aruba_client.get('/network-monitoring/v1alpha1/devices')
+            devices = devices_response.get('items', devices_response.get('devices', []))
+            if devices:
+                logger.info(f"Fetched {len(devices)} devices from network-monitoring/v1alpha1/devices")
+        except (HTTPError, ConnectionError, Timeout) as e:
+            logger.warning(f"Primary device API failed, attempting fallback: {e}")
+            warnings.append("Primary device API unavailable, using fallback endpoint")
+            # Fallback to monitoring/v1 API
+            try:
+                devices_response = aruba_client.get('/monitoring/v1/devices')
+                devices = devices_response.get('items', devices_response.get('devices', []))
+                if devices:
+                    logger.info(f"Fetched {len(devices)} devices from monitoring/v1/devices (fallback)")
+            except (HTTPError, ConnectionError, Timeout) as e2:
+                logger.error(f"Both device APIs failed: primary={e}, fallback={e2}")
+                return jsonify({
+                    "error": "Unable to fetch device inventory from any available API",
+                    "details": str(e2),
+                    "items": [],
+                    "count": 0
+                }), 503
+
+        if not devices:
+            logger.warning("No devices found from any API endpoint")
+            return jsonify({"items": [], "count": 0, "message": "No devices found"})
+
+        # Try to fetch GreenLake devices for enrichment
+        gl_devices = {}
+        gl_error = None
+        try:
+            gl_client = _get_greenlake_client()
+            if gl_client:
+                gl_response = gl_client.get('/devices/v1/devices')
+                gl_items = gl_response.get('items', [])
+                # Index by serial number for fast lookup
+                for gl_device in gl_items:
+                    serial = gl_device.get('serialNumber') or gl_device.get('serial')
+                    if serial:
+                        gl_devices[serial.upper()] = gl_device
+                logger.info(f"Fetched {len(gl_devices)} GreenLake devices for enrichment")
+            else:
+                gl_error = "GreenLake client not configured"
+        except (HTTPError, ConnectionError, Timeout) as e:
+            logger.warning(f"GreenLake devices not available for enrichment: {e}")
+            gl_error = f"GreenLake API unavailable: {str(e)}"
+
+        # Merge device data with GreenLake data
+        enriched_devices = []
+        gl_matched_count = 0
+
+        for device in devices:
+            # Try multiple field names for serial number
+            serial = device.get('serial') or device.get('serialNumber') or device.get('device_id') or ''
+            serial_upper = serial.upper() if serial else ''
+
+            enriched_device = {
+                # Device fields from Aruba Central
+                'name': device.get('name'),
+                'serial': device.get('serial'),
+                'deviceType': device.get('deviceType') or device.get('device_type'),
+                'macAddress': device.get('macaddr') or device.get('macAddress'),
+                'model': device.get('model'),
+                'status': device.get('status'),
+                'ipAddress': device.get('ip_address') or device.get('ipAddress'),
+                'site': device.get('site') or device.get('siteName'),
+                'group': device.get('group') or device.get('groupName'),
+                'firmwareVersion': device.get('firmware_version') or device.get('firmwareVersion'),
+                'clientCount': device.get('client_count') or device.get('clientCount'),
+                'cpuUtilization': device.get('cpu_utilization') or device.get('cpuUtilization'),
+                'memoryUtilization': device.get('mem_utilization') or device.get('memoryUtilization'),
+                'uptime': device.get('uptime'),
+                'lastSeen': device.get('last_seen') or device.get('lastSeen'),
+                'labels': device.get('labels', []),
+            }
+
+            # Enrich with GreenLake data if available
+            if serial_upper and serial_upper in gl_devices:
+                gl_matched_count += 1
+                gl = gl_devices[serial_upper]
+                enriched_device['gl_deviceId'] = gl.get('id') or gl.get('deviceId')
+                enriched_device['gl_partNumber'] = gl.get('partNumber')
+                enriched_device['gl_productId'] = gl.get('productId')
+                enriched_device['gl_subscriptionKey'] = gl.get('subscriptionKey')
+                enriched_device['gl_subscriptionTier'] = gl.get('subscriptionTier') or gl.get('tier')
+                enriched_device['gl_subscriptionExpiry'] = gl.get('subscriptionExpiresAt') or gl.get('expirationDate')
+                enriched_device['gl_cloudActivationKey'] = gl.get('cloudActivationKey') or gl.get('activationKey')
+                enriched_device['gl_applicationId'] = gl.get('applicationId') or gl.get('appId')
+                enriched_device['gl_applicationName'] = gl.get('applicationName') or gl.get('appName')
+                enriched_device['gl_platformCustomerId'] = gl.get('platformCustomerId')
+                enriched_device['gl_createdAt'] = gl.get('createdAt')
+                enriched_device['gl_updatedAt'] = gl.get('updatedAt')
+                enriched_device['gl_tags'] = gl.get('tags', [])
+                enriched_device['gl_matched'] = True
+            else:
+                enriched_device['gl_matched'] = False
+
+            enriched_devices.append(enriched_device)
+
+        # Sort by name
+        enriched_devices.sort(key=lambda x: (x.get('name') or '').lower())
+
+        response = {
+            "items": enriched_devices,
+            "count": len(enriched_devices),
+            "gl_matched_count": gl_matched_count,
+            "gl_available": len(gl_devices) > 0
+        }
+        # Include optional fields only when relevant
+        if gl_error:
+            response["gl_error"] = gl_error
+        if warnings:
+            response["warnings"] = warnings
+
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error fetching devices with GreenLake data: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ============= Services Endpoints =============
