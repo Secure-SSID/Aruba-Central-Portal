@@ -14,6 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { flattenObject, escapeCSVValue } from '../utils/exportUtils';
 import {
   Box,
   Card,
@@ -33,6 +34,8 @@ import {
   Alert,
   Chip,
   Stack,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Download as DownloadIcon,
@@ -53,10 +56,15 @@ import {
   Business as WorkspaceIcon,
   VpnKey as RoleIcon,
   LocationOn as LocationIcon,
+  AccountTree as AccountTreeIcon,
+  PlayCircle as PlayCircleIcon,
+  Edit as EditIcon,
+  Bookmark as BookmarkIcon,
+  Close as CloseIcon,
+  Info as InfoIcon,
 } from '@mui/icons-material';
 import {
   reportingAPI,
-  deviceAPI,
   monitoringAPIv2,
   alertsAPI,
   firmwareAPI,
@@ -68,7 +76,11 @@ import {
   greenlakeSubscriptionsAPI,
   greenlakeWorkspacesAPI,
   greenlakeRoleAPI,
+  batchAPI,
 } from '../services/api';
+import { APIMindMapDialog } from '../components/api-mindmap';
+import apiCollectionStorage from '../utils/apiCollectionStorage';
+import { findEndpointById } from '../config/apiEndpointTree';
 
 /**
  * Format header name from API key for CSV column headers.
@@ -91,53 +103,7 @@ const formatHeader = (key) => {
     .trim();
 };
 
-/**
- * Escape a CSV value to prevent injection and formatting issues.
- * Handles commas, quotes, and newlines in values.
- *
- * @param {string} value - Value to escape
- * @returns {string} Escaped value safe for CSV
- */
-const escapeCSVValue = (value) => {
-  if (value === null || value === undefined) return '';
-  const str = String(value);
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-};
-
-/**
- * Flatten nested object to dot-notation keys for CSV export.
- *
- * Transformation rules:
- * - null/undefined -> '' (empty string)
- * - arrays -> semicolon-separated values
- * - booleans -> 'Yes' or 'No'
- * - nested objects -> recursively flattened with dot notation
- *
- * @param {Object} obj - Object to flatten
- * @param {string} prefix - Key prefix for nested properties
- * @returns {Object} Flat object with dot-notation keys
- */
-const flattenObject = (obj, prefix = '') => {
-  const result = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const newKey = prefix ? `${prefix}.${key}` : key;
-    if (value === null || value === undefined) {
-      result[newKey] = '';
-    } else if (Array.isArray(value)) {
-      result[newKey] = value.join('; ');
-    } else if (typeof value === 'object') {
-      Object.assign(result, flattenObject(value, newKey));
-    } else if (typeof value === 'boolean') {
-      result[newKey] = value ? 'Yes' : 'No';
-    } else {
-      result[newKey] = value;
-    }
-  }
-  return result;
-};
+// Utility functions (flattenObject, escapeCSVValue) imported from ../utils/exportUtils
 
 /**
  * Get all available fields from data array
@@ -186,7 +152,9 @@ const exportToCSV = (data, selectedFields, filename) => {
   const link = document.createElement('a');
   try {
     link.href = url;
-    link.download = `${filename}_${new Date().toISOString().split('T')[0]}.csv`;
+    // Generate unique filename with date and time
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    link.download = `${filename}_${timestamp}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -362,7 +330,7 @@ function CSVExportDialog({ open, onClose, title, data, defaultFields, priorityFi
 /**
  * Compact Report Card Component - minimal, clean design
  */
-function ReportCard({ title, icon, recordCount, onExport, loading, color = 'primary.main' }) {
+function ReportCard({ title, icon, recordCount, onExport, loading, color = 'primary.main', apiEndpoint }) {
   const isDisabled = loading || recordCount === 0;
 
   return (
@@ -397,6 +365,18 @@ function ReportCard({ title, icon, recordCount, onExport, loading, color = 'prim
           >
             {title}
           </Typography>
+          {apiEndpoint && (
+            <Tooltip title={apiEndpoint} arrow placement="top">
+              <InfoIcon
+                sx={{
+                  fontSize: 14,
+                  color: 'text.secondary',
+                  opacity: 0.6,
+                  '&:hover': { opacity: 1 }
+                }}
+              />
+            </Tooltip>
+          )}
           {loading ? (
             <CircularProgress size={14} />
           ) : recordCount !== undefined ? (
@@ -449,29 +429,17 @@ const REPORT_CATEGORIES = [
         title: 'All Devices',
         icon: <DevicesIcon />,
         color: 'primary.main',
+        apiEndpoint: 'GET /network-monitoring/v1alpha1/devices',
         defaultFields: ['name', 'serial', 'deviceType', 'model', 'status', 'ipAddress', 'site', 'firmwareVersion'],
         priorityFields: ['name', 'serial', 'deviceType', 'model', 'status', 'ipAddress', 'site'],
         filename: 'device_inventory',
-      },
-      {
-        id: 'devices_greenlake',
-        title: 'All Devices + GreenLake',
-        icon: <CloudIcon />,
-        color: '#01A982',
-        defaultFields: [
-          'name', 'serial', 'deviceType', 'model', 'status', 'ipAddress', 'site', 'firmwareVersion',
-          'gl_subscriptionKey', 'gl_subscriptionTier', 'gl_subscriptionExpiry', 'gl_matched'
-        ],
-        priorityFields: [
-          'name', 'serial', 'deviceType', 'status', 'site', 'gl_subscriptionKey', 'gl_subscriptionTier', 'gl_subscriptionExpiry'
-        ],
-        filename: 'devices_with_greenlake',
       },
       {
         id: 'sites',
         title: 'Sites',
         icon: <LocationIcon />,
         color: 'info.main',
+        apiEndpoint: 'GET /network-config/v1alpha1/sites',
         defaultFields: ['site_name', 'site_id', 'address', 'city', 'state', 'country'],
         priorityFields: ['site_name', 'site_id', 'address', 'city', 'state', 'country'],
         filename: 'sites',
@@ -488,6 +456,7 @@ const REPORT_CATEGORIES = [
         title: 'WLANs / SSIDs',
         icon: <WifiIcon />,
         color: 'secondary.main',
+        apiEndpoint: 'GET /network-config/v1alpha1/wlan-ssids',
         defaultFields: ['ssid', 'enabled', 'forwardMode', 'opmode', 'rfBand', 'vlanName', 'hideSsid'],
         priorityFields: ['ssid', 'enabled', 'forwardMode', 'opmode', 'rfBand', 'vlanName'],
         filename: 'wlans',
@@ -497,6 +466,7 @@ const REPORT_CATEGORIES = [
         title: 'Top APs by Clients',
         icon: <ClientsIcon />,
         color: 'primary.main',
+        apiEndpoint: 'GET /network-monitoring/v1alpha1/top-aps-by-client-count',
         defaultFields: ['name', 'serial', 'client_count', 'site', 'model'],
         priorityFields: ['name', 'serial', 'client_count', 'site'],
         filename: 'top_aps_by_clients',
@@ -506,6 +476,7 @@ const REPORT_CATEGORIES = [
         title: 'Top APs by Bandwidth',
         icon: <SpeedIcon />,
         color: 'success.main',
+        apiEndpoint: 'GET /network-monitoring/v1alpha1/top-aps-by-wireless-usage',
         defaultFields: ['name', 'serial', 'tx_bytes', 'rx_bytes', 'site'],
         priorityFields: ['name', 'serial', 'tx_bytes', 'rx_bytes', 'site'],
         filename: 'top_aps_by_bandwidth',
@@ -522,18 +493,20 @@ const REPORT_CATEGORIES = [
         title: 'Alerts',
         icon: <WarningIcon />,
         color: 'error.main',
-        defaultFields: ['timestamp', 'type', 'severity', 'description', 'device_serial'],
-        priorityFields: ['timestamp', 'type', 'severity', 'description'],
+        apiEndpoint: 'GET /network-monitoring/v1alpha1/sites-health (alerts extracted)',
+        defaultFields: ['siteName', 'severity', 'count', 'siteId'],
+        priorityFields: ['siteName', 'severity', 'count'],
         filename: 'alerts',
       },
       {
         id: 'idps',
-        title: 'IDPS Events',
+        title: 'IDPS Threats',
         icon: <SecurityIcon />,
         color: 'error.main',
-        defaultFields: ['timestamp', 'threat_name', 'src_ip', 'dst_ip', 'action', 'severity'],
-        priorityFields: ['timestamp', 'threat_name', 'src_ip', 'dst_ip', 'action'],
-        filename: 'idps_events',
+        apiEndpoint: 'GET /network-monitoring/v1alpha1/threats',
+        defaultFields: ['timestamp', 'signatureName', 'srcIp', 'destIp', 'action', 'severity'],
+        priorityFields: ['timestamp', 'signatureName', 'srcIp', 'destIp', 'action'],
+        filename: 'idps_threats',
       },
     ],
   },
@@ -547,8 +520,9 @@ const REPORT_CATEGORIES = [
         title: 'Firmware Compliance',
         icon: <InventoryIcon />,
         color: 'warning.main',
-        defaultFields: ['name', 'serial', 'device_type', 'firmware_version', 'compliance'],
-        priorityFields: ['name', 'serial', 'device_type', 'firmware_version', 'compliance'],
+        apiEndpoint: 'GET /network-services/v1alpha1/firmware-details',
+        defaultFields: ['deviceName', 'serialNumber', 'deviceType', 'softwareVersion', 'recommendedVersion', 'upgradeStatus'],
+        priorityFields: ['deviceName', 'serialNumber', 'deviceType', 'softwareVersion', 'upgradeStatus'],
         filename: 'firmware_compliance',
       },
     ],
@@ -563,8 +537,9 @@ const REPORT_CATEGORIES = [
         title: 'Users',
         icon: <ClientsIcon />,
         color: '#01A982',
-        defaultFields: ['email', 'displayName', 'status', 'createdAt', 'lastLogin'],
-        priorityFields: ['email', 'displayName', 'status', 'createdAt'],
+        apiEndpoint: 'GET /identity/v1/users',
+        defaultFields: ['username', 'displayName', 'userStatus', 'id', 'createdAt', 'updatedAt'],
+        priorityFields: ['username', 'displayName', 'userStatus', 'id'],
         filename: 'greenlake_users',
       },
       {
@@ -572,8 +547,9 @@ const REPORT_CATEGORIES = [
         title: 'Devices',
         icon: <DevicesIcon />,
         color: '#01A982',
-        defaultFields: ['serialNumber', 'deviceType', 'model', 'status', 'location'],
-        priorityFields: ['serialNumber', 'deviceType', 'model', 'status'],
+        apiEndpoint: 'GET /devices/v1/devices (enriched with subscription tiers)',
+        defaultFields: ['serialNumber', 'deviceType', 'model', 'status', 'location', 'subscription', 'subscription_tier'],
+        priorityFields: ['serialNumber', 'deviceType', 'model', 'status', 'subscription_tier'],
         filename: 'greenlake_devices',
       },
       {
@@ -581,6 +557,7 @@ const REPORT_CATEGORIES = [
         title: 'Tags',
         icon: <TagIcon />,
         color: '#01A982',
+        apiEndpoint: 'GET /tags/v1/tags',
         defaultFields: ['name', 'description', 'createdAt', 'resourceCount'],
         priorityFields: ['name', 'description', 'createdAt'],
         filename: 'greenlake_tags',
@@ -590,8 +567,9 @@ const REPORT_CATEGORIES = [
         title: 'Subscriptions',
         icon: <SubscriptionIcon />,
         color: '#01A982',
-        defaultFields: ['subscriptionKey', 'productDescription', 'status', 'startDate', 'endDate'],
-        priorityFields: ['subscriptionKey', 'productDescription', 'status', 'startDate', 'endDate'],
+        apiEndpoint: 'GET /subscriptions/v1/subscriptions',
+        defaultFields: ['id', 'key', 'tier', 'tierDescription', 'subscriptionType', 'subscriptionStatus', 'quantity', 'availableQuantity', 'startTime', 'endTime'],
+        priorityFields: ['key', 'tier', 'tierDescription', 'subscriptionStatus', 'quantity'],
         filename: 'greenlake_subscriptions',
       },
       {
@@ -599,6 +577,7 @@ const REPORT_CATEGORIES = [
         title: 'Workspaces',
         icon: <WorkspaceIcon />,
         color: '#01A982',
+        apiEndpoint: 'GET /workspaces/v1/workspaces',
         defaultFields: ['name', 'id', 'status', 'createdAt'],
         priorityFields: ['name', 'id', 'status', 'createdAt'],
         filename: 'greenlake_workspaces',
@@ -608,6 +587,7 @@ const REPORT_CATEGORIES = [
         title: 'Role Assignments',
         icon: <RoleIcon />,
         color: '#01A982',
+        apiEndpoint: 'GET /iam/v1/users/{userId}/roles',
         defaultFields: ['userId', 'roleId', 'roleName', 'assignedAt'],
         priorityFields: ['userId', 'roleId', 'roleName'],
         filename: 'greenlake_roles',
@@ -623,6 +603,130 @@ function ReportingPage() {
   const [loadingReports, setLoadingReports] = useState({});
   const [error, setError] = useState(null);
   const [glStatus, setGlStatus] = useState({ available: null, error: null });
+  const [mindMapOpen, setMindMapOpen] = useState(false);
+  const [batchResults, setBatchResults] = useState(null);
+  const [savedCollections, setSavedCollections] = useState([]);
+  const [executingCollection, setExecutingCollection] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
+  const [collectionFieldSelectionOpen, setCollectionFieldSelectionOpen] = useState(false);
+  const [activeCollection, setActiveCollection] = useState(null);
+  const [collectionData, setCollectionData] = useState(null);
+  const [collectionSelectedFields, setCollectionSelectedFields] = useState(new Set());
+  const [collectionAvailableFields, setCollectionAvailableFields] = useState([]);
+
+  // Handle batch execution from mind map
+  const handleBatchExecute = useCallback(async (endpoints) => {
+    const results = await batchAPI.executeAll(endpoints);
+    setBatchResults(results);
+    return results;
+  }, []);
+
+  // Handle execute collection - opens field selection dialog
+  const handleExecuteCollection = useCallback(async (collection) => {
+    setExecutingCollection(collection.id);
+    setActiveCollection(collection);
+    setError(null);
+    
+    try {
+      // Convert endpoint IDs to full endpoint objects
+      const endpoints = collection.endpointIds
+        .map(id => findEndpointById(id))
+        .filter(Boolean);
+      
+      if (endpoints.length === 0) {
+        setError(`Collection "${collection.name}" has no valid endpoints`);
+        setExecutingCollection(null);
+        return;
+      }
+
+      // Execute to get data
+      const results = await batchAPI.executeAll(endpoints);
+      setBatchResults(results);
+      
+      // Extract all data for field analysis - flatten it first to get _tier fields
+      const allData = [];
+      results.forEach((result) => {
+        if (result.status === 'fulfilled' && result.data) {
+          const items = result.data.items || result.data.devices || result.data.wlans ||
+                        result.data.clients || result.data.alerts || result.data.sites ||
+                        [result.data];
+          if (Array.isArray(items)) {
+            items.forEach(item => {
+              // Flatten each item to get subscription_tier and other generated fields
+              const flattened = flattenObject(item);
+              allData.push(flattened);
+            });
+          }
+        }
+      });
+
+      if (allData.length === 0) {
+        setError(`Collection "${collection.name}" returned no data`);
+        setExecutingCollection(null);
+        return;
+      }
+
+      // Store data for export
+      setCollectionData(results);
+      
+      // Get available fields from flattened data
+      const allKeys = new Set();
+      allData.forEach((item) => {
+        Object.keys(item).forEach((key) => allKeys.add(key));
+      });
+      const fields = Array.from(allKeys).sort();
+      setCollectionAvailableFields(fields);
+      
+      // Pre-select common useful fields
+      const commonFields = ['serialNumber', 'serial', 'name', 'deviceType', 'model', 'status', 'ipAddress', 'site'];
+      const preselected = fields.filter(f => commonFields.includes(f));
+      setCollectionSelectedFields(new Set(preselected.length > 0 ? preselected : fields.slice(0, 10)));
+      
+      // Open field selection dialog
+      setCollectionFieldSelectionOpen(true);
+    } catch (err) {
+      setError(`Failed to execute collection: ${err.message}`);
+    } finally {
+      setExecutingCollection(null);
+    }
+  }, []);
+
+  // Handle export collection with selected fields
+  const handleExportCollection = useCallback(() => {
+    if (!collectionData || !activeCollection) return;
+
+    batchAPI.exportAsCSV(collectionData, Array.from(collectionSelectedFields));
+    setCollectionFieldSelectionOpen(false);
+    setSuccessMessage(`Collection "${activeCollection.name}" exported with ${collectionSelectedFields.size} fields`);
+    setTimeout(() => setSuccessMessage(null), 3000);
+  }, [collectionData, activeCollection, collectionSelectedFields]);
+
+  // Handle open collection in mind map
+  const handleOpenInMindMap = useCallback((collection) => {
+    // Store collection to load in mind map
+    sessionStorage.setItem('loadCollection', JSON.stringify(collection));
+    setMindMapOpen(true);
+  }, []);
+
+  // Handle export from mind map
+  const handleBatchExport = useCallback((endpoints, format, selectedFields) => {
+    if (!batchResults || batchResults.length === 0) {
+      // Execute first if no results
+      batchAPI.executeAll(endpoints).then((results) => {
+        if (format === 'csv') {
+          batchAPI.exportAsCSV(results, selectedFields);
+        } else {
+          batchAPI.exportAsJSON(results, selectedFields);
+        }
+      });
+    } else {
+      if (format === 'csv') {
+        batchAPI.exportAsCSV(batchResults, selectedFields);
+      } else {
+        batchAPI.exportAsJSON(batchResults, selectedFields);
+      }
+    }
+  }, [batchResults]);
 
   // Load record counts with error tracking
   const loadReportCounts = useCallback(async () => {
@@ -675,12 +779,13 @@ function ReportingPage() {
     }
 
     // Load GreenLake counts separately (may fail if not configured)
+    // Fetch all data without limits to get accurate counts
     try {
       const [glUsers, glDevices, glTags, glSubs, glWorkspaces, glRoles] = await Promise.all([
-        greenlakeUserAPI.list({ limit: 1 }).catch(() => null),
-        greenlakeDeviceAPI.list({ limit: 1 }).catch(() => null),
+        greenlakeUserAPI.list().catch(() => null),
+        greenlakeDeviceAPI.listWithTiers().catch(() => null),
         greenlakeTagsAPI.list().catch(() => null),
-        greenlakeSubscriptionsAPI.list({ limit: 1 }).catch(() => null),
+        greenlakeSubscriptionsAPI.list().catch(() => null),
         greenlakeWorkspacesAPI.list().catch(() => null),
         greenlakeRoleAPI.listAssignments().catch(() => null),
       ]);
@@ -696,6 +801,13 @@ function ReportingPage() {
         gl_subscriptions: glSubs?.items || glSubs?.subscriptions || [],
         gl_workspaces: glWorkspaces?.items || glWorkspaces?.tenants || [],
         gl_roles: glRoles?.items || glRoles?.assignments || [],
+        // Store totals - prioritize API total/count, fallback to actual items length
+        gl_users_total: glUsers?.total ?? glUsers?.count ?? (glUsers?.items || glUsers?.users || []).length,
+        gl_devices_total: glDevices?.total ?? glDevices?.count ?? (glDevices?.items || glDevices?.devices || []).length,
+        gl_tags_total: glTags?.total ?? glTags?.count ?? (glTags?.items || glTags?.tags || []).length,
+        gl_subscriptions_total: glSubs?.total ?? glSubs?.count ?? (glSubs?.items || glSubs?.subscriptions || []).length,
+        gl_workspaces_total: glWorkspaces?.total ?? glWorkspaces?.count ?? (glWorkspaces?.items || glWorkspaces?.tenants || []).length,
+        gl_roles_total: glRoles?.total ?? glRoles?.count ?? (glRoles?.items || glRoles?.assignments || []).length,
       }));
 
       setGlStatus({
@@ -718,6 +830,11 @@ function ReportingPage() {
     loadReportCounts();
   }, [loadReportCounts]);
 
+  // Load saved collections on mount and when dialog closes
+  useEffect(() => {
+    setSavedCollections(apiCollectionStorage.getCollections());
+  }, [mindMapOpen]);
+
   const loadReportData = async (reportId) => {
     setLoadingReports((prev) => ({ ...prev, [reportId]: true }));
     setError(null);
@@ -729,18 +846,6 @@ function ReportingPage() {
         case 'devices': {
           const response = await monitoringAPIv2.getDevicesMonitoring({ limit: 1000 });
           data = response.items || response.devices || [];
-          break;
-        }
-        case 'devices_greenlake': {
-          const response = await reportingAPI.getDevicesWithGreenLake();
-          if (response.error) {
-            throw new Error(response.error);
-          }
-          data = response.items || response.devices || [];
-          // Warn user if GreenLake enrichment failed but devices were returned
-          if (response.gl_error && data.length > 0) {
-            setError(`Note: ${response.gl_error}. Some GreenLake fields may be missing.`);
-          }
           break;
         }
         case 'wlans': {
@@ -778,14 +883,14 @@ function ReportingPage() {
           data = response.events || response.items || [];
           break;
         }
-        // GreenLake Reports
+        // GreenLake Reports - fetch all without limits
         case 'gl_users': {
-          const response = await greenlakeUserAPI.list({ limit: 1000 });
+          const response = await greenlakeUserAPI.list();
           data = response.items || response.users || [];
           break;
         }
         case 'gl_devices': {
-          const response = await greenlakeDeviceAPI.list({ limit: 1000 });
+          const response = await greenlakeDeviceAPI.listWithTiers();
           data = response.items || response.devices || [];
           break;
         }
@@ -795,7 +900,7 @@ function ReportingPage() {
           break;
         }
         case 'gl_subscriptions': {
-          const response = await greenlakeSubscriptionsAPI.list({ limit: 1000 });
+          const response = await greenlakeSubscriptionsAPI.list();
           data = response.items || response.subscriptions || [];
           break;
         }
@@ -845,6 +950,13 @@ function ReportingPage() {
   }, [reportData]);
 
   const getRecordCount = (reportId) => {
+    // For GreenLake reports, use stored totals (since we fetch with limit:1 initially)
+    if (reportId.startsWith('gl_')) {
+      const totalKey = `${reportId}_total`;
+      if (reportData[totalKey] !== undefined) {
+        return reportData[totalKey];
+      }
+    }
     const data = reportData[reportId];
     return data ? data.length : undefined;
   };
@@ -852,13 +964,23 @@ function ReportingPage() {
   return (
     <Box>
       {/* Header */}
-      <Box sx={{ mb: 2.5 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600, mb: 0.25 }}>
-          Reports
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Click a report to export data as CSV
-        </Typography>
+      <Box sx={{ mb: 2.5, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 600, mb: 0.25 }}>
+            Reports
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Click a report to export data as CSV
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          startIcon={<AccountTreeIcon />}
+          onClick={() => setMindMapOpen(true)}
+          size="small"
+        >
+          API Mind Map
+        </Button>
       </Box>
 
       {/* Error Alert */}
@@ -868,11 +990,112 @@ function ReportingPage() {
         </Alert>
       )}
 
+      {/* Success Alert */}
+      {successMessage && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccessMessage(null)}>
+          {successMessage}
+        </Alert>
+      )}
+
       {/* GreenLake Status Alert */}
       {glStatus.available === false && glStatus.error && (
         <Alert severity="info" sx={{ mb: 2 }}>
           {glStatus.error}. GreenLake reports will show 0 records.
         </Alert>
+      )}
+
+      {/* Saved Collections Section */}
+      {savedCollections.length > 0 && (
+        <Box sx={{ mb: 4 }}>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 1.5 }}>
+            <BookmarkIcon sx={{ fontSize: 18 }} />
+            <Typography variant="subtitle2" fontWeight={600} color="text.secondary">
+              Saved Collections ({savedCollections.length})
+            </Typography>
+          </Stack>
+          <Grid container spacing={1.5}>
+            {savedCollections.map((collection) => (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={collection.id}>
+                <Card
+                  variant="outlined"
+                  sx={{
+                    height: '100%',
+                    transition: 'all 0.15s ease-in-out',
+                    borderColor: 'divider',
+                    '&:hover': {
+                      borderColor: 'primary.main',
+                      boxShadow: 1,
+                    },
+                  }}
+                >
+                  <CardActionArea
+                    component="div"
+                    onClick={() => handleExecuteCollection(collection)}
+                    disabled={executingCollection === collection.id}
+                    sx={{ height: '100%', p: 1.5 }}
+                  >
+                    <Stack spacing={1}>
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <Box sx={{ color: 'primary.main', display: 'flex' }}>
+                          {executingCollection === collection.id ? (
+                            <CircularProgress size={16} />
+                          ) : (
+                            <PlayCircleIcon sx={{ fontSize: 20 }} />
+                          )}
+                        </Box>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography
+                            variant="body2"
+                            fontWeight={500}
+                            noWrap
+                            sx={{ mb: 0.25 }}
+                          >
+                            {collection.name}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {collection.description || 'No description'}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Chip
+                          label={`${collection.endpointIds.length} endpoints`}
+                          size="small"
+                          sx={{
+                            height: 18,
+                            fontSize: '0.65rem',
+                            '& .MuiChip-label': { px: 0.75 },
+                          }}
+                        />
+                        <Button
+                          size="small"
+                          startIcon={<EditIcon sx={{ fontSize: 14 }} />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenInMindMap(collection);
+                          }}
+                          sx={{ ml: 'auto', fontSize: '0.7rem', minWidth: 0, px: 0.75 }}
+                        >
+                          Edit
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  </CardActionArea>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </Box>
       )}
 
       {/* Report Sections */}
@@ -884,6 +1107,7 @@ function ReportingPage() {
                 title={report.title}
                 icon={report.icon}
                 color={report.color}
+                apiEndpoint={report.apiEndpoint}
                 recordCount={getRecordCount(report.id)}
                 loading={loadingReports[report.id]}
                 onExport={() => handleExportClick(report)}
@@ -908,6 +1132,121 @@ function ReportingPage() {
           filename={activeReport.filename}
         />
       )}
+
+      {/* API Mind Map Dialog */}
+      <APIMindMapDialog
+        open={mindMapOpen}
+        onClose={() => {
+          setMindMapOpen(false);
+          setBatchResults(null);
+        }}
+        onExecute={handleBatchExecute}
+        onExport={handleBatchExport}
+      />
+
+      {/* Collection Field Selection Dialog */}
+      <Dialog
+        open={collectionFieldSelectionOpen}
+        onClose={() => setCollectionFieldSelectionOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box>
+              <Typography variant="h6">
+                {activeCollection?.name || 'Select Fields'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Choose fields to export ({collectionSelectedFields.size} of {collectionAvailableFields.length} selected)
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={() => setCollectionFieldSelectionOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <Button
+              size="small"
+              startIcon={<SelectAllIcon />}
+              onClick={() => setCollectionSelectedFields(new Set(collectionAvailableFields))}
+            >
+              Select All
+            </Button>
+            <Button
+              size="small"
+              startIcon={<DeselectIcon />}
+              onClick={() => setCollectionSelectedFields(new Set())}
+            >
+              Deselect All
+            </Button>
+          </Stack>
+
+          <Box
+            sx={{
+              maxHeight: 400,
+              overflow: 'auto',
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+              p: 1,
+            }}
+          >
+            <Grid container spacing={0}>
+              {collectionAvailableFields.map((field) => (
+                <Grid item xs={6} key={field}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={collectionSelectedFields.has(field)}
+                        onChange={(e) => {
+                          setCollectionSelectedFields((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) {
+                              next.add(field);
+                            } else {
+                              next.delete(field);
+                            }
+                            return next;
+                          });
+                        }}
+                        size="small"
+                        sx={{ py: 0.25 }}
+                      />
+                    }
+                    label={
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
+                        {formatHeader(field)}
+                      </Typography>
+                    }
+                    sx={{ m: 0, width: '100%' }}
+                  />
+                </Grid>
+              ))}
+              {collectionAvailableFields.length === 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 2 }}>
+                    No fields available
+                  </Typography>
+                </Grid>
+              )}
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCollectionFieldSelectionOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleExportCollection}
+            disabled={collectionSelectedFields.size === 0}
+            startIcon={<DownloadIcon />}
+          >
+            Export CSV ({collectionSelectedFields.size} fields)
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

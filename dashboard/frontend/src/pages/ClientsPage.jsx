@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -33,7 +33,39 @@ import {
   ArrowUpward as ArrowUpwardIcon,
   ArrowDownward as ArrowDownwardIcon,
 } from '@mui/icons-material';
-import { getClients, getClientTrends, getTopClients, sitesConfigAPI, monitoringAPIv2, configAPI } from '../services/api';
+import { getClients, getClientTrends, getTopClients, sitesConfigAPI, monitoringAPIv2, configAPI, createClientsStream } from '../services/api';
+
+// ============= Cache Utilities =============
+const CACHE_KEY = 'clients_page_data';
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const getCachedClients = () => {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < CACHE_TTL) {
+        console.log('📦 Loading clients from cache:', data.clients?.length || 0, 'clients');
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load cached clients:', err);
+  }
+  return null;
+};
+
+const setCachedClients = (data) => {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      data,
+      timestamp: Date.now()
+    }));
+    console.log('💾 Cached clients data:', data.clients?.length || 0, 'clients');
+  } catch (err) {
+    console.warn('Failed to cache clients:', err);
+  }
+};
 
 function ClientsPage() {
   const [clients, setClients] = useState([]);
@@ -51,17 +83,154 @@ function ClientsPage() {
   const [loadingSites, setLoadingSites] = useState(true); // Separate loading state for sites
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc');
+  const [sseConnected, setSseConnected] = useState(false);
+
+  // SSE connection ref
+  const sseRef = useRef(null);
+
+  // Delta merge function - applies incremental updates to client list
+  const applyDeltaUpdate = useCallback((delta) => {
+    setClients(prev => {
+      let updated = [...prev];
+
+      // Remove disconnected clients
+      if (delta.removed && delta.removed.length > 0) {
+        const removedSet = new Set(delta.removed);
+        updated = updated.filter(c => !removedSet.has(c.mac) && !removedSet.has(c.macAddress));
+      }
+
+      // Add new clients
+      if (delta.added && delta.added.length > 0) {
+        // Add site names to new clients
+        const newClients = delta.added.map(client => {
+          if (!client.siteName && client.siteId) {
+            const site = sites.find(s => {
+              const sId = s.scopeId || s.id || s.siteId || s.site_id;
+              return sId?.toString() === client.siteId?.toString();
+            });
+            if (site) {
+              client.siteName = site.scopeName || site.name || site.siteName || site.site_name || `Site ${client.siteId}`;
+            }
+          }
+          return client;
+        });
+        updated.push(...newClients);
+      }
+
+      // Update changed clients
+      if (delta.changed && delta.changed.length > 0) {
+        delta.changed.forEach(changed => {
+          const mac = changed.mac || changed.macAddress;
+          const idx = updated.findIndex(c => c.mac === mac || c.macAddress === mac);
+          if (idx >= 0) {
+            updated[idx] = { ...updated[idx], ...changed };
+          }
+        });
+      }
+
+      return updated;
+    });
+  }, [sites]);
 
   useEffect(() => {
     loadSites();
+
+    // Load cached data immediately for instant UI
+    const cached = getCachedClients();
+    if (cached && cached.clients) {
+      console.log('🚀 Instant load from cache:', cached.clients.length, 'clients');
+      setClients(cached.clients);
+    }
   }, []);
 
+  // SSE connection effect - replaces REST polling
   useEffect(() => {
-    // Only load data after sites have been loaded (even if empty)
-    if (sitesLoaded) {
-      loadData();
+    // Only start SSE after sites are loaded and we have selected sites
+    if (!sitesLoaded || selectedSites.length === 0) {
+      return;
     }
-  }, [selectedSites, sitesLoaded]);
+
+    // Close existing connection if any
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+
+    setLoading(true);
+    setSseConnected(false);
+
+    console.log('🔌 Starting SSE connection for sites:', selectedSites);
+
+    const stream = createClientsStream(selectedSites, {
+      onConnected: (data) => {
+        console.log('✅ SSE Connected with', data.clients?.length || 0, 'clients');
+        setSseConnected(true);
+        setLoading(false);
+        setError(null);
+
+        // Process clients - add site names
+        const processedClients = (data.clients || []).map(client => {
+          if (!client.siteName) {
+            const clientSiteId = client.siteId || client['site-id'] || client.site_id;
+            const site = sites.find(s => {
+              const siteId = s.scopeId || s.id || s.siteId || s.site_id;
+              return siteId?.toString() === clientSiteId?.toString();
+            });
+            if (site) {
+              client.siteId = clientSiteId;
+              client.siteName = site.scopeName || site.name || site.siteName || site.site_name || `Site ${clientSiteId}`;
+            } else if (clientSiteId) {
+              client.siteId = clientSiteId;
+              client.siteName = `Site ${clientSiteId}`;
+            }
+          }
+          return client;
+        });
+
+        setClients(processedClients);
+
+        // Cache the data
+        setCachedClients({
+          clients: processedClients,
+          counts: data.counts,
+          timestamp: new Date().toISOString()
+        });
+      },
+
+      onDelta: (delta) => {
+        console.log('📊 Delta update:', delta);
+        applyDeltaUpdate(delta);
+
+        // Update cache with current state
+        setClients(currentClients => {
+          setCachedClients({
+            clients: currentClients,
+            counts: delta.counts,
+            timestamp: new Date().toISOString()
+          });
+          return currentClients;
+        });
+      },
+
+      onError: (err) => {
+        console.error('❌ SSE Error:', err);
+        setSseConnected(false);
+        // Don't clear clients on error - keep showing last known state
+        setError(`Real-time connection error: ${err.message}. Data may be stale.`);
+      }
+    });
+
+    sseRef.current = stream;
+
+    // Cleanup on unmount or when selected sites change
+    return () => {
+      if (sseRef.current) {
+        console.log('🔌 Cleaning up SSE connection');
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+    };
+  }, [selectedSites, sitesLoaded, sites, applyDeltaUpdate]);
 
   const loadSites = async () => {
     try {
