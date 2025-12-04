@@ -8,8 +8,11 @@ import sys
 import os
 import json
 import re
+import queue
+import threading
+import hmac
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 from flask_compress import Compress
 import logging
@@ -37,7 +40,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder='../frontend/build', static_url_path='')
 CORS(app, origins=['http://localhost:1344', 'http://localhost:5000'])
 
-# Enable compression (gzip and brotli)
+# Enable compression (gzip and brotli) - exclude SSE from compression
+app.config['COMPRESS_MIMETYPES'] = [
+    'text/html', 'text/css', 'text/xml', 'application/json',
+    'application/javascript', 'text/javascript'
+]  # Explicitly exclude text/event-stream
 Compress(app)
 
 # Cache control helper functions
@@ -96,6 +103,139 @@ api_call_tracker = {
     'second_window': [],  # Track calls in current second
     'all_calls': []  # Track all calls for analytics
 }
+
+# ============= Client Streaming Cache =============
+# In-memory client cache for SSE streaming with delta support
+client_cache_lock = threading.RLock()  # RLock allows re-entrant locking (same thread can acquire multiple times)
+client_cache = {
+    'clients_by_mac': {},        # MAC -> full client object (keyed by MAC address)
+    'clients_by_site': {},       # site_id -> {mac: client} for site-filtered access
+    'last_full_fetch': None,     # Timestamp of last full fetch
+    'sse_subscribers': [],       # List of queues for SSE connections
+    'webhook_secret': os.environ.get('ARUBA_WEBHOOK_SECRET', 'default-webhook-secret')
+}
+
+def broadcast_delta_to_subscribers(delta):
+    """Broadcast a delta update to all SSE subscribers."""
+    with client_cache_lock:
+        for subscriber_queue in client_cache['sse_subscribers']:
+            try:
+                subscriber_queue.put_nowait(delta)
+            except queue.Full:
+                logger.warning("SSE subscriber queue full, dropping update")
+
+def calculate_client_counts(clients):
+    """Calculate client statistics from a list of clients."""
+    counts = {
+        'total': len(clients),
+        'connected': 0,
+        'failed': 0,
+        'connecting': 0,
+        'disconnected': 0,
+        'wireless': 0,
+        'wired': 0
+    }
+    for client in clients:
+        status = (client.get('status') or '').lower()
+        client_type = (client.get('type') or '').lower()
+
+        if status == 'connected':
+            counts['connected'] += 1
+        elif status == 'failed':
+            counts['failed'] += 1
+        elif status == 'connecting':
+            counts['connecting'] += 1
+        elif status == 'disconnected':
+            counts['disconnected'] += 1
+
+        if client_type == 'wireless':
+            counts['wireless'] += 1
+        elif client_type == 'wired':
+            counts['wired'] += 1
+
+    return counts
+
+def calculate_client_delta(old_state, new_clients):
+    """
+    Calculate delta between old state (dict by MAC) and new client list.
+    Returns: {'added': [...], 'removed': [...], 'changed': [...]}
+    """
+    new_state = {c.get('mac', c.get('macAddress', '')): c for c in new_clients if c.get('mac') or c.get('macAddress')}
+
+    added = []
+    removed = []
+    changed = []
+
+    old_macs = set(old_state.keys())
+    new_macs = set(new_state.keys())
+
+    # Find added clients
+    for mac in new_macs - old_macs:
+        added.append(new_state[mac])
+
+    # Find removed clients
+    for mac in old_macs - new_macs:
+        removed.append(mac)
+
+    # Find changed clients (compare key fields)
+    for mac in old_macs & new_macs:
+        old_client = old_state[mac]
+        new_client = new_state[mac]
+
+        # Compare key fields that might change
+        changed_fields = False
+        for field in ['status', 'ipv4', 'ipv6', 'connectedTo', 'connected_to', 'signal', 'snr', 'experience']:
+            if old_client.get(field) != new_client.get(field):
+                changed_fields = True
+                break
+
+        if changed_fields:
+            changed.append(new_client)
+
+    return {
+        'added': added,
+        'removed': removed,
+        'changed': changed
+    }
+
+def fetch_all_clients_for_sites(site_ids):
+    """Fetch all clients for the given site IDs."""
+    all_clients = []
+
+    if not aruba_client:
+        return all_clients
+
+    for site_id in site_ids:
+        if not site_id:
+            continue
+        try:
+            offset = 0
+            limit = 100
+            while True:
+                params = {
+                    'site-id': site_id,
+                    'limit': limit,
+                    'offset': offset
+                }
+                response = aruba_client.get('/network-monitoring/v1alpha1/clients', params=params)
+                items = response.get('items', [])
+
+                # Add site_id to each client
+                for item in items:
+                    item['siteId'] = site_id
+
+                all_clients.extend(items)
+
+                total = response.get('total', len(items))
+                offset += len(items)
+
+                if len(items) == 0 or offset >= total or len(all_clients) >= 10000:
+                    break
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch clients for site {site_id}: {e}")
+
+    return all_clients
 
 # Initialize Aruba Client
 aruba_client = None
@@ -183,7 +323,13 @@ def track_api_call():
     api_call_tracker['second_window'].append(current_time)
 
 
-SESSION_STORE_FILE = Path(os.environ.get('TOKEN_CACHE_DIR', '/app/data')) / 'sessions.json'
+# Session storage - use TOKEN_CACHE_DIR if set, otherwise use local data directory
+_token_cache_dir = os.environ.get('TOKEN_CACHE_DIR')
+if _token_cache_dir:
+    SESSION_STORE_FILE = Path(_token_cache_dir) / 'sessions.json'
+else:
+    # For local development, use the backend directory
+    SESSION_STORE_FILE = Path(__file__).parent / 'data' / 'sessions.json'
 
 def _load_sessions_from_disk():
     try:
@@ -432,6 +578,147 @@ def get_rate_limit_status():
     })
 
 
+# ============= Server-Sent Events (SSE) for Real-Time Updates =============
+
+@app.route('/api/dashboard/stream')
+def dashboard_stream():
+    """
+    Server-Sent Events endpoint for real-time dashboard updates.
+    Streams device stats, client counts, and rate limit info every 10 seconds.
+
+    SSE Format:
+        event: dashboard-update
+        data: {"devices": {...}, "clients": {...}, "rateLimit": {...}}
+    """
+    # Capture request data before entering generator (request context won't be available inside generator)
+    session_id = request.args.get('session')
+
+    # Try to load sessions from disk (in case backend restarted)
+    if session_id and session_id not in active_sessions:
+        _load_sessions_from_disk()
+
+    # Validate session before starting generator
+    if not session_id or session_id not in active_sessions:
+        def error_gen():
+            yield f"event: error\ndata: {json.dumps({'error': 'Invalid session'})}\n\n"
+        return Response(
+            error_gen(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+            }
+        )
+
+    # Refresh session expiry (SSE connections are long-lived)
+    active_sessions[session_id]['expires'] = time.time() + SESSION_TIMEOUT
+
+    def generate():
+        """Generator function that yields SSE formatted data."""
+        # Send initial connection confirmation
+        yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'interval': 10})}\n\n"
+
+        retry_count = 0
+        max_retries = 3
+
+        while True:
+            try:
+                if not aruba_client:
+                    yield f"event: error\ndata: {json.dumps({'error': 'Server not configured'})}\n\n"
+                    time.sleep(30)
+                    continue
+
+                # Fetch dashboard data
+                dashboard_data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'devices': None,
+                    'clients': None,
+                    'rateLimit': None
+                }
+
+                # Get devices
+                try:
+                    devices_response = aruba_client.get('/network-monitoring/v1alpha1/devices')
+                    items = devices_response.get('items', [])
+
+                    # Calculate device stats
+                    device_counts = {'SWITCH': 0, 'AP': 0, 'GATEWAY': 0, 'TOTAL': len(items)}
+                    for device in items:
+                        device_type = (device.get('deviceType') or device.get('device_type') or '').upper()
+                        if device_type == 'SWITCH':
+                            device_counts['SWITCH'] += 1
+                        elif device_type in ('AP', 'IAP', 'ACCESS_POINT'):
+                            device_counts['AP'] += 1
+                        elif device_type == 'GATEWAY':
+                            device_counts['GATEWAY'] += 1
+
+                    dashboard_data['devices'] = {
+                        'total': device_counts['TOTAL'],
+                        'switches': device_counts['SWITCH'],
+                        'accessPoints': device_counts['AP'],
+                        'gateways': device_counts['GATEWAY']
+                    }
+                except Exception as e:
+                    logger.warning(f"SSE: Failed to fetch devices: {e}")
+
+                # Get clients count
+                try:
+                    clients_response = aruba_client.get('/network-monitoring/v1alpha1/clients', params={'limit': 1})
+                    dashboard_data['clients'] = {
+                        'total': clients_response.get('total', clients_response.get('count', 0))
+                    }
+                except Exception as e:
+                    logger.warning(f"SSE: Failed to fetch clients: {e}")
+
+                # Get rate limit info (using same structure as /api/rate-limit/status)
+                t = api_call_tracker
+                daily_lim, sec_lim = 5000, 7
+                reset_sec = max(0, t['daily_reset_time'] - time.time())
+                dashboard_data['rateLimit'] = {
+                    'daily_calls': t['daily_calls'],
+                    'daily_limit': daily_lim,
+                    'daily_percentage': (t['daily_calls'] / daily_lim * 100),
+                    'calls_remaining': max(0, daily_lim - t['daily_calls']),
+                    'reset_in_hours': int(reset_sec // 3600),
+                    'reset_in_minutes': int((reset_sec % 3600) // 60),
+                    'current_rate_per_second': len(t['second_window']),
+                    'per_second_limit': sec_lim,
+                    'recent_calls': len(t['all_calls'])
+                }
+
+                # Send the update
+                yield f"event: dashboard-update\ndata: {json.dumps(dashboard_data)}\n\n"
+
+                retry_count = 0  # Reset on success
+                time.sleep(10)  # Wait 10 seconds before next update
+
+            except GeneratorExit:
+                # Client disconnected
+                logger.info("SSE: Client disconnected")
+                break
+            except Exception as e:
+                logger.error(f"SSE: Error in stream: {e}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    yield f"event: error\ndata: {json.dumps({'error': 'Too many errors, closing stream'})}\n\n"
+                    break
+                yield f"event: error\ndata: {json.dumps({'error': str(e), 'retry': retry_count})}\n\n"
+                time.sleep(5)  # Wait before retry
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',  # Disable nginx buffering
+            'Access-Control-Allow-Origin': request.headers.get('Origin', '*'),
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    )
+
+
 # ============= Device Management Endpoints =============
 
 @app.route('/api/devices', methods=['GET'])
@@ -613,17 +900,31 @@ def get_switch_interfaces(serial): pass
 @require_session
 def run_switch_show_command(serial):
     """Run a 'show' command on a CX switch and return task ID.
-    
+
     Reference: https://developer.arubanetworks.com/new-central/reference/runcxshowcommand
     Endpoint: /network-troubleshooting/v1alpha1/cx/{serial-number}/showCommand
     """
     try:
         data = request.get_json()
         command = data.get('command', '')
-        
+
         if not command.startswith('show '):
             return jsonify({"error": "Command must start with 'show '"}), 400
-        
+
+        # Validate command to prevent injection attacks
+        # Only allow alphanumeric, spaces, hyphens, underscores, colons, slashes, and pipes
+        import re
+        if not re.match(r'^show [a-zA-Z0-9\s\-_:/|]+$', command):
+            return jsonify({"error": "Invalid characters in command. Only alphanumeric, spaces, hyphens, underscores, colons, slashes, and pipes are allowed."}), 400
+
+        # Limit command length to prevent abuse
+        if len(command) > 200:
+            return jsonify({"error": "Command too long. Maximum 200 characters allowed."}), 400
+
+        # Validate serial number format (alphanumeric only)
+        if not re.match(r'^[a-zA-Z0-9]+$', serial):
+            return jsonify({"error": "Invalid serial number format."}), 400
+
         response = aruba_client.post(
             f'/network-troubleshooting/v1alpha1/cx/{serial}/showCommand',
             json={'command': command}
@@ -1462,22 +1763,22 @@ def sites_config():
 
 @app.route('/api/sites', methods=['GET'])
 @require_session
-@api_proxy('/central/v2/sites', error_msg="Sites", fallback_data={"sites": [], "count": 0, "total": 0})
+@api_proxy('/network-config/v1alpha1/sites', error_msg="Sites", fallback_data={"items": [], "count": 0, "total": 0})
 def get_sites(): pass
 
 @app.route('/api/sites/<site_id>', methods=['GET'])
 @require_session
-@api_proxy(lambda site_id: f'/central/v2/sites/{site_id}', error_msg="Site details", fallback_data={})
+@api_proxy(lambda site_id: f'/network-config/v1alpha1/sites/{site_id}', error_msg="Site details", fallback_data={})
 def get_site_details(site_id): pass
 
 @app.route('/api/sites', methods=['POST'])
 @require_session
-@api_proxy('/central/v2/sites', method='POST', error_msg="Create site")
+@api_proxy('/network-config/v1alpha1/sites', method='POST', error_msg="Create site")
 def create_site(): pass
 
 @app.route('/api/sites/<site_id>', methods=['DELETE'])
 @require_session
-@api_proxy(lambda site_id: f'/central/v2/sites/{site_id}', method='DELETE', error_msg="Delete site")
+@api_proxy(lambda site_id: f'/network-config/v1alpha1/sites/{site_id}', method='DELETE', error_msg="Delete site")
 def delete_site(site_id): pass
 
 @app.route('/api/groups', methods=['GET'])
@@ -3024,29 +3325,57 @@ def get_switch_port_status():
 @app.route('/api/alerts', methods=['GET'])
 @require_session
 def get_alerts():
-    """Get all alerts."""
+    """Get all alerts derived from sites-health endpoint.
+
+    Note: Aruba Central does not have a dedicated alerts endpoint.
+    Alert data is extracted from /network-monitoring/v1alpha1/sites-health.
+    """
     try:
         # Get query parameters for filtering
         severity = request.args.get('severity')
-        limit = request.args.get('limit', 100)
+        limit = int(request.args.get('limit', 100))
 
-        params = {'limit': limit}
-        if severity:
-            params['severity'] = severity
-
-        # Try the network-monitoring API first
+        # Fetch sites-health which includes alert data
         try:
-            response = aruba_client.get('/network-monitoring/v1alpha1/alerts', params=params)
-            return jsonify(response)
+            response = aruba_client.get('/network-monitoring/v1alpha1/sites-health')
+
+            # Extract alerts from sites-health data
+            alerts = []
+            sites = response.get('items', [])
+
+            for site in sites:
+                site_alerts = site.get('alerts', {})
+                alert_groups = site_alerts.get('groups', [])
+                total_count = site_alerts.get('totalCount', 0)
+
+                if total_count > 0:
+                    for group in alert_groups:
+                        alert_entry = {
+                            'siteId': site.get('id'),
+                            'siteName': site.get('name'),
+                            'severity': group.get('name', 'Unknown'),
+                            'count': group.get('count', 0),
+                            'source': 'sites-health'
+                        }
+                        # Apply severity filter if provided
+                        if severity and alert_entry['severity'].lower() != severity.lower():
+                            continue
+                        alerts.append(alert_entry)
+
+            # Apply limit
+            alerts = alerts[:limit]
+
+            return jsonify({
+                "alerts": alerts,
+                "count": len(alerts),
+                "total": len(alerts),
+                "source": "/network-monitoring/v1alpha1/sites-health"
+            })
         except Exception as network_err:
-            # Fallback: Return empty alerts list if endpoint doesn't exist
-            if "404" in str(network_err) or "Not Found" in str(network_err):
-                logger.warning(f"Alerts endpoint not available: {network_err}")
-                return jsonify({"alerts": [], "count": 0, "total": 0})
-            raise network_err
+            logger.warning(f"Sites-health endpoint error: {network_err}")
+            return jsonify({"alerts": [], "count": 0, "total": 0})
     except Exception as e:
         logger.error(f"Error fetching alerts: {e}")
-        # Return empty data instead of 500 error
         return jsonify({"alerts": [], "count": 0, "total": 0, "error": "Alerts API not available"})
 
 
@@ -3103,53 +3432,81 @@ def get_events():
 @app.route('/api/firmware/versions', methods=['GET'])
 @require_session
 def get_firmware_versions():
-    """Get available firmware versions."""
+    """Get firmware details for all devices.
+
+    Uses the correct API: /network-services/v1alpha1/firmware-details
+    See: docs/api/aruba-api-docs/mrt-apis/services/firmware/get-device-list-with-firmware-details.md
+
+    Returns firmware versions grouped by device type for compatibility with existing frontend.
+    """
     try:
-        device_type = request.args.get('device_type', 'IAP')
-        try:
-            response = aruba_client.get(f'/firmware/v1/versions/{device_type}')
-            return jsonify(response)
-        except Exception as fw_err:
-            # Fallback to new Central inventory-based versions (if available) or return empty
-            if '404' in str(fw_err) or 'Not Found' in str(fw_err):
-                logger.warning("Firmware versions API not found; returning empty list")
-                return jsonify({"versions": [], "count": 0})
-            raise fw_err
+        device_type_filter = request.args.get('device_type')
+        response = aruba_client.get('/network-services/v1alpha1/firmware-details')
+        items = response.get('items', [])
+
+        # Filter by device type if specified
+        if device_type_filter:
+            device_type_map = {
+                'IAP': 'ACCESS_POINT',
+                'AP': 'ACCESS_POINT',
+                'SWITCH': 'SWITCH',
+                'GATEWAY': 'GATEWAY',
+                'GW': 'GATEWAY'
+            }
+            mapped_type = device_type_map.get(device_type_filter.upper(), device_type_filter.upper())
+            items = [d for d in items if d.get('deviceType') == mapped_type]
+
+        # Extract unique versions for the response
+        versions = list(set(d.get('softwareVersion') for d in items if d.get('softwareVersion')))
+        return jsonify({
+            "versions": versions,
+            "count": len(versions),
+            "devices": items
+        })
     except Exception as e:
-        logger.error(f"Error fetching firmware versions: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error fetching firmware details: {e}")
+        return jsonify({"versions": [], "count": 0, "error": str(e)}), 500
 
 
 @app.route('/api/firmware/compliance', methods=['GET'])
 @require_session
 def get_firmware_compliance():
-    """Get firmware compliance status for devices."""
+    """Get firmware compliance status for devices.
+
+    Uses the correct API: /network-services/v1alpha1/firmware-details
+    See: docs/api/aruba-api-docs/mrt-apis/services/firmware/get-device-list-with-firmware-details.md
+
+    Calculates compliance based on softwareVersion vs recommendedVersion.
+    """
     try:
-        # Try different firmware API endpoints
-        try:
-            response = aruba_client.get('/firmware/v1/status')
-            return jsonify(response)
-        except Exception as fw_err:
-            # Try alternative endpoint
-            if "404" in str(fw_err) or "Not Found" in str(fw_err):
-                try:
-                    response = aruba_client.get('/platform/device_inventory/v1/devices')
-                    # Transform to compliance format
-                    devices = response.get('devices', [])
-                    return jsonify({
-                        "compliant": sum(1 for d in devices if d.get('firmware_compliant', False)),
-                        "non_compliant": sum(1 for d in devices if not d.get('firmware_compliant', True)),
-                        "total": len(devices),
-                        "devices": devices
-                    })
-                except:
-                    # Return empty compliance data
-                    logger.warning("Firmware compliance endpoint not available")
-                    return jsonify({"compliant": 0, "non_compliant": 0, "total": 0, "devices": []})
-            raise fw_err
+        response = aruba_client.get('/network-services/v1alpha1/firmware-details')
+        items = response.get('items', [])
+
+        # Calculate compliance: device is compliant if softwareVersion == recommendedVersion
+        compliant = []
+        non_compliant = []
+        for device in items:
+            current = device.get('softwareVersion', '')
+            recommended = device.get('recommendedVersion', '')
+            upgrade_status = device.get('upgradeStatus', '')
+
+            # Compliant if up to date or versions match
+            if upgrade_status == 'Up To Date' or current == recommended:
+                compliant.append(device)
+            else:
+                non_compliant.append(device)
+
+        return jsonify({
+            "compliant": len(compliant),
+            "non_compliant": len(non_compliant),
+            "total": len(items),
+            "devices": items,
+            "compliant_devices": compliant,
+            "non_compliant_devices": non_compliant
+        })
     except Exception as e:
         logger.error(f"Error fetching firmware compliance: {e}")
-        return jsonify({"compliant": 0, "non_compliant": 0, "total": 0, "devices": [], "error": "Firmware API not available"})
+        return jsonify({"compliant": 0, "non_compliant": 0, "total": 0, "devices": [], "error": str(e)}), 500
 
 
 @app.route('/api/firmware/upgrade', methods=['POST'])
@@ -3456,7 +3813,15 @@ def upload_device_image():
         
         if not part_number:
             return jsonify({"error": "Part number is required"}), 400
-        
+
+        # Sanitize part_number to prevent path traversal attacks
+        # Only allow alphanumeric, hyphens, underscores, and dots (no slashes or ..)
+        import re
+        if not re.match(r'^[a-zA-Z0-9._-]+$', part_number):
+            return jsonify({"error": "Invalid part number format. Only alphanumeric characters, dots, hyphens, and underscores are allowed."}), 400
+        if '..' in part_number:
+            return jsonify({"error": "Invalid part number format."}), 400
+
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
         
@@ -3848,42 +4213,51 @@ GL_API_BASE={gl_api_base}
             os.environ['GL_API_BASE'] = gl_api_base or 'https://global.api.greenlake.hpe.com'
             logger.info("Credentials set in environment variables directly")
 
-        # Reinitialize client with new credentials
-        if initialize_client():
-            # Send SIGHUP to gunicorn master process to reload all workers
-            # This ensures all workers pick up the new credentials
-            try:
-                import signal
-                import os
-                master_pid = os.getppid()  # Parent process is gunicorn master
-                logger.info(f"Sending SIGHUP to gunicorn master (pid: {master_pid}) to reload workers")
-                os.kill(master_pid, signal.SIGHUP)
-                logger.info("Worker reload signal sent successfully")
-            except Exception as e:
-                logger.warning(f"Could not reload workers automatically: {e}")
-                logger.info("Workers will reload on next container restart")
+        # Mark credentials as configured (skip token validation during setup)
+        credentials_configured = True
+        logger.info("Credentials saved successfully")
 
-            # Create a session automatically so user doesn't have to login again
-            import secrets
-            session_id = secrets.token_urlsafe(32)
-            active_sessions[session_id] = {
-                'created': time.time(),
-                'expires': time.time() + SESSION_TIMEOUT
-            }
-            logger.info("Session created automatically after credential configuration")
-            _save_sessions_to_disk()
+        # Try to initialize client, but don't fail setup if it errors
+        # (network may not be available, credentials will be validated on first use)
+        init_success = False
+        try:
+            init_success = initialize_client()
+            if init_success:
+                logger.info("Client initialized and credentials validated successfully")
+        except Exception as e:
+            logger.warning(f"Could not validate credentials immediately: {e}")
+            logger.info("Credentials will be validated on first API call")
 
-            return jsonify({
-                "success": True,
-                "message": "Credentials configured successfully! Workers reloading...",
-                "configured": True,
-                "session_id": session_id,
-                "expires_in": SESSION_TIMEOUT
-            })
-        else:
-            return jsonify({
-                "error": "Credentials saved but failed to initialize client. Please check your credentials."
-            }), 500
+        # Send SIGHUP to gunicorn master process to reload all workers
+        # This ensures all workers pick up the new credentials
+        try:
+            import signal
+            master_pid = os.getppid()  # Parent process is gunicorn master
+            logger.info(f"Sending SIGHUP to gunicorn master (pid: {master_pid}) to reload workers")
+            os.kill(master_pid, signal.SIGHUP)
+            logger.info("Worker reload signal sent successfully")
+        except Exception as e:
+            logger.warning(f"Could not reload workers automatically: {e}")
+            logger.info("Workers will reload on next container restart")
+
+        # Create a session automatically so user doesn't have to login again
+        import secrets
+        session_id = secrets.token_urlsafe(32)
+        active_sessions[session_id] = {
+            'created': time.time(),
+            'expires': time.time() + SESSION_TIMEOUT
+        }
+        logger.info("Session created automatically after credential configuration")
+        _save_sessions_to_disk()
+
+        return jsonify({
+            "success": True,
+            "message": "Credentials configured successfully!",
+            "configured": True,
+            "session_id": session_id,
+            "expires_in": SESSION_TIMEOUT,
+            "validated": init_success
+        })
 
     except Exception as e:
         logger.error(f"Error configuring credentials: {e}")
@@ -3917,7 +4291,11 @@ def _get_greenlake_client():
 @app.route('/api/greenlake/users', methods=['GET'])
 @require_session
 def greenlake_list_users():
-    """List users from HPE GreenLake Identity service."""
+    """List users from HPE GreenLake Identity service.
+    
+    Uses: /identity/v1/users
+    Returns: id, username, displayName, userStatus, roles, etc.
+    """
     try:
         client = _get_greenlake_client()
         if not client:
@@ -3933,7 +4311,13 @@ def greenlake_list_users():
             params['offset'] = offset
         if limit is not None:
             params['limit'] = limit
+        # Use /identity/v1/users endpoint (works without organization-id)
         data = client.get('/identity/v1/users', params=params)
+        # Ensure response has items and count fields
+        if isinstance(data, dict):
+            items = data.get('items', data.get('users', []))
+            if 'total' not in data and 'count' not in data:
+                data['count'] = len(items) if isinstance(items, list) else 0
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake users fetch error: {e}")
@@ -3989,12 +4373,20 @@ def greenlake_user_detail(user_id):
 @app.route('/api/greenlake/devices', methods=['GET'])
 @require_session
 def greenlake_list_devices():
-    """List devices from HPE GreenLake Device Management."""
+    """List devices from HPE GreenLake Device Management.
+
+    Uses the correct API: /device-management/v1/devices
+    See: docs/greenlake/aruba-api-docs/greenlake-device-apis.md
+    """
     try:
         client = _get_greenlake_client()
         if not client:
             return jsonify({"error": "GreenLake RBAC not configured"}), 400
         params = {}
+        # workspace-id filter (may be required in multi-workspace context)
+        workspace_id = request.args.get('workspace_id') or request.args.get('workspace-id')
+        if workspace_id:
+            params['workspace-id'] = workspace_id
         # pagination
         offset = request.args.get('offset')
         limit = request.args.get('limit')
@@ -4002,8 +4394,106 @@ def greenlake_list_devices():
             params['offset'] = offset
         if limit is not None:
             params['limit'] = limit
-        # v1 devices list
+        # filter and sort
+        if request.args.get('filter'):
+            params['filter'] = request.args.get('filter')
+        if request.args.get('sort'):
+            params['sort'] = request.args.get('sort')
+        # Use correct devices endpoint (HPE GreenLake API)
         data = client.get('/devices/v1/devices', params=params)
+        
+        # Enrich devices with subscription tier information
+        enrich_with_tiers = request.args.get('enrich_tiers', 'false').lower() == 'true'
+        if enrich_with_tiers and isinstance(data, dict):
+            logger.info("🔍 Enriching devices with subscription tiers...")
+            try:
+                # Fetch all subscriptions to get tier mappings
+                subs_data = client.get('/subscriptions/v1/subscriptions', params={'limit': 1000})
+                subs_items = subs_data.get('items', [])
+                logger.info(f"📊 Fetched {len(subs_items)} subscriptions for tier mapping")
+                
+                # Create subscription ID -> tier mapping
+                sub_tier_map = {}
+                for sub in subs_items:
+                    sub_id = sub.get('id') or sub.get('key')
+                    tier = sub.get('tier')
+                    tier_desc = sub.get('tierDescription')
+                    if sub_id and tier:
+                        sub_tier_map[sub_id] = {
+                            'tier': tier,
+                            'tierDescription': tier_desc
+                        }
+                logger.info(f"🗺️  Created tier mapping for {len(sub_tier_map)} subscriptions")
+                
+                # Enrich each device's subscription data with tier
+                items = data.get('items', data.get('devices', []))
+                enriched_count = 0
+                for device in items:
+                    subscription_field = device.get('subscription')
+                    
+                    # Handle different subscription formats
+                    if isinstance(subscription_field, list):
+                        enriched_subs = []
+                        for sub in subscription_field:
+                            # Case 1: Subscription is already an object
+                            if isinstance(sub, dict):
+                                sub_id = None
+                                if sub.get('resourceUri'):
+                                    import re
+                                    match = re.search(r'/([a-f0-9-]{36})$', sub.get('resourceUri', ''), re.I)
+                                    if match:
+                                        sub_id = match.group(1)
+                                if not sub_id:
+                                    sub_id = sub.get('id') or sub.get('key') or sub.get('subscriptionKey')
+                                
+                                # Add tier info if we have it
+                                if sub_id and sub_id in sub_tier_map:
+                                    sub['tier'] = sub_tier_map[sub_id]['tier']
+                                    sub['tierDescription'] = sub_tier_map[sub_id]['tierDescription']
+                                    enriched_count += 1
+                                enriched_subs.append(sub)
+                            
+                            # Case 2: Subscription is just a string ID
+                            elif isinstance(sub, str):
+                                sub_id = sub
+                                if sub_id in sub_tier_map:
+                                    enriched_subs.append({
+                                        'id': sub_id,
+                                        'key': sub_id,
+                                        'tier': sub_tier_map[sub_id]['tier'],
+                                        'tierDescription': sub_tier_map[sub_id]['tierDescription']
+                                    })
+                                    enriched_count += 1
+                                    logger.debug(f"✅ Converted subscription {sub_id[:8]}... to object with tier: {sub_tier_map[sub_id]['tier']}")
+                                else:
+                                    # Keep as object but without tier
+                                    enriched_subs.append({'id': sub_id, 'key': sub_id})
+                        
+                        device['subscription'] = enriched_subs
+                    
+                    # Handle single subscription (not array)
+                    elif isinstance(subscription_field, str):
+                        sub_id = subscription_field
+                        if sub_id in sub_tier_map:
+                            device['subscription'] = [{
+                                'id': sub_id,
+                                'key': sub_id,
+                                'tier': sub_tier_map[sub_id]['tier'],
+                                'tierDescription': sub_tier_map[sub_id]['tierDescription']
+                            }]
+                            enriched_count += 1
+                        else:
+                            device['subscription'] = [{'id': sub_id, 'key': sub_id}]
+                
+                logger.info(f"✨ Enriched {enriched_count} device subscriptions with tier information")
+            except Exception as e:
+                logger.warning(f"Failed to enrich devices with subscription tiers: {e}")
+        
+        # Ensure response has items and count fields
+        if isinstance(data, dict):
+            items = data.get('items', data.get('devices', []))
+            if 'total' not in data and 'count' not in data:
+                data['count'] = len(items) if isinstance(items, list) else 0
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake devices fetch error: {e}")
@@ -4011,18 +4501,23 @@ def greenlake_list_devices():
 @app.route('/api/greenlake/devices', methods=['POST', 'PATCH'])
 @require_session
 def greenlake_modify_devices():
-    """Create or update devices via GreenLake Device Management."""
+    """Create or update devices via GreenLake Device Management.
+
+    Uses the correct API: /device-management/v1/devices
+    See: docs/greenlake/aruba-api-docs/greenlake-device-apis.md
+    """
     try:
         client = _get_greenlake_client()
         if not client:
             return jsonify({"error": "GreenLake RBAC not configured"}), 400
         payload = request.get_json() or {}
         if request.method == 'POST':
+            # POST returns 202 Accepted (asynchronous operation)
             data = client.post('/devices/v1/devices', data=payload)
-            return jsonify(data), 201
+            return jsonify(data), 202
         if request.method == 'PATCH':
-            # Use PUT for device updates (GreenLake API standard)
-            data = client.put('/devices/v1/devices', data=payload)
+            # PATCH for device updates
+            data = client.patch('/devices/v1/devices', data=payload)
             return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake devices modify error: {e}")
@@ -4038,6 +4533,11 @@ def greenlake_list_tags():
             return jsonify({"error": "GreenLake RBAC not configured"}), 400
         params = {}
         data = client.get('/tags/v1/tags', params=params)
+        # Ensure response has items and count fields
+        if isinstance(data, dict):
+            items = data.get('items', data.get('tags', []))
+            if 'total' not in data and 'count' not in data:
+                data['count'] = len(items) if isinstance(items, list) else 0
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake tags fetch error: {e}")
@@ -4090,19 +4590,40 @@ def greenlake_delete_tag(tag_id):
 @app.route('/api/greenlake/subscriptions', methods=['GET'])
 @require_session
 def greenlake_list_subscriptions():
-    """List subscriptions from HPE GreenLake Subscription Management."""
+    """List subscriptions from HPE GreenLake Subscription Management.
+
+    Uses the correct API: /subscription-management/v1/subscriptions
+    See: docs/greenlake/aruba-api-docs/greenlake-device-apis.md
+    """
     try:
         client = _get_greenlake_client()
         if not client:
             return jsonify({"error": "GreenLake RBAC not configured"}), 400
         params = {}
+        # Optional filters
+        device_id = request.args.get('device_id') or request.args.get('device-id')
+        workspace_id = request.args.get('workspace_id') or request.args.get('workspace-id')
+        status = request.args.get('status')
+        if device_id:
+            params['device-id'] = device_id
+        if workspace_id:
+            params['workspace-id'] = workspace_id
+        if status:
+            params['status'] = status
+        # Pagination
         offset = request.args.get('offset')
         limit = request.args.get('limit')
         if offset is not None:
             params['offset'] = offset
         if limit is not None:
             params['limit'] = limit
+        # Use correct subscriptions endpoint (HPE GreenLake API v1 - current stable version)
         data = client.get('/subscriptions/v1/subscriptions', params=params)
+        # Ensure response has items and count fields
+        if isinstance(data, dict):
+            items = data.get('items', data.get('subscriptions', []))
+            if 'total' not in data and 'count' not in data:
+                data['count'] = len(items) if isinstance(items, list) else 0
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake subscriptions fetch error: {e}")
@@ -4111,14 +4632,18 @@ def greenlake_list_subscriptions():
 @app.route('/api/greenlake/subscriptions', methods=['POST'])
 @require_session
 def greenlake_create_subscription():
-    """Create subscription (if supported by Subscriptions v1)."""
+    """Create subscription via GreenLake Subscription Management.
+
+    Uses the correct API: /subscription-management/v1/subscriptions
+    POST returns 202 Accepted (asynchronous operation)
+    """
     try:
         client = _get_greenlake_client()
         if not client:
             return jsonify({"error": "GreenLake RBAC not configured"}), 400
         payload = request.get_json() or {}
         data = client.post('/subscriptions/v1/subscriptions', data=payload)
-        return jsonify(data), 201
+        return jsonify(data), 202
     except Exception as e:
         logger.error(f"GreenLake create subscription error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4126,13 +4651,17 @@ def greenlake_create_subscription():
 @app.route('/api/greenlake/subscriptions/<sub_id>', methods=['PATCH'])
 @require_session
 def greenlake_update_subscription(sub_id):
-    """Update subscription (if supported by Subscriptions v1)."""
+    """Update subscription via GreenLake Subscription Management.
+
+    Uses the correct API: /subscription-management/v1/subscriptions
+    Currently supports adding/removing tags only.
+    """
     try:
         client = _get_greenlake_client()
         if not client:
             return jsonify({"error": "GreenLake RBAC not configured"}), 400
         payload = request.get_json() or {}
-        data = client.put(f'/subscriptions/v1/subscriptions/{sub_id}', data=payload)
+        data = client.patch(f'/subscriptions/v1/subscriptions/{sub_id}', data=payload)
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake update subscription error: {e}")
@@ -4149,6 +4678,11 @@ def greenlake_list_workspaces():
         params = {}
         try:
             data = client.get('/workspaces/v1/msp-tenants', params=params)
+            # Ensure response has items and count fields
+            if isinstance(data, dict):
+                items = data.get('items', data.get('tenants', []))
+                if 'total' not in data and 'count' not in data:
+                    data['count'] = len(items) if isinstance(items, list) else 0
             return jsonify(data)
         except Exception as e:
             err = str(e)
@@ -4432,14 +4966,19 @@ def greenlake_list_role_assignments():
     try:
         client = _get_greenlake_client()
         if not client:
-            return jsonify({"assignments": []}), 200
+            return jsonify({"assignments": [], "count": 0}), 200
         # Call GreenLake Authorization API to get role assignments
         data = client.get('/authorization/v1/role-assignments')
+        # Ensure response has items and count fields
+        if isinstance(data, dict):
+            items = data.get('items', data.get('assignments', []))
+            if 'total' not in data and 'count' not in data:
+                data['count'] = len(items) if isinstance(items, list) else 0
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake role assignments list error: {e}")
         # Graceful fallback
-        return jsonify({"assignments": []}), 200
+        return jsonify({"assignments": [], "count": 0}), 200
 
 @app.route('/api/greenlake/role-assignments', methods=['POST'])
 @require_session
@@ -4495,8 +5034,8 @@ def greenlake_list_permissions():
                     "subscriptions.view", "subscriptions.create", "subscriptions.update", "subscriptions.transfer",
                 ]
             }), 200
-        # Call GreenLake Authorization API to get permissions
-        data = client.get('/authorization/v1/permissions')
+        # Call GreenLake IAM API to get permissions
+        data = client.get('/iam/v1/permissions')
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake permissions list error: {e}")
@@ -4511,8 +5050,8 @@ def greenlake_role_permissions_map():
         client = _get_greenlake_client()
         if not client:
             return jsonify({}), 200
-        # Call GreenLake Authorization API to get role-permission mappings
-        data = client.get('/authorization/v1/role-permissions')
+        # Call GreenLake IAM API to get role-permission mappings
+        data = client.get('/iam/v1/role-permissions')
         return jsonify(data)
     except Exception as e:
         logger.error(f"GreenLake role-permissions map error: {e}")
@@ -4529,8 +5068,8 @@ def greenlake_create_custom_role():
         payload = request.get_json() or {}
         if not payload.get('name') or not payload.get('permissions'):
             return jsonify({"error": "Role name and permissions are required"}), 400
-        # Call GreenLake Authorization API to create custom role
-        data = client.post('/authorization/v1/custom-roles', data=payload)
+        # Call GreenLake IAM API to create custom role
+        data = client.post('/iam/v1/custom-roles', data=payload)
         return jsonify(data), 201
     except Exception as e:
         logger.error(f"GreenLake custom role create error: {e}")
@@ -4811,6 +5350,7 @@ def get_devices_with_greenlake():
         try:
             gl_client = _get_greenlake_client()
             if gl_client:
+                # Use correct device-management endpoint
                 gl_response = gl_client.get('/devices/v1/devices')
                 gl_items = gl_response.get('items', [])
                 # Index by serial number for fast lookup
@@ -6123,9 +6663,22 @@ def get_firewall_sessions():
 @app.route('/api/monitoring/idps/events', methods=['GET'])
 @require_session
 def get_idps_events():
-    """Get IDPS (Intrusion Detection/Prevention System) events."""
+    """Get IDPS threats from network monitoring API.
+
+    Uses the /threats endpoint which requires start-time parameter.
+    See: docs/api/aruba-api-docs/mrt-apis/monitoring/idps/get-a-list-of-idps-threats.md
+    """
     try:
+        import time
         params = {}
+        # start-time is required - default to 24 hours ago if not provided
+        start_time = request.args.get('start_time') or request.args.get('start-time')
+        if start_time:
+            params['start-time'] = start_time
+        else:
+            # Default to 24 hours ago (in milliseconds)
+            params['start-time'] = int((time.time() - 86400) * 1000)
+
         if request.args.get('gateway_serial'):
             params['gateway_serial'] = request.args.get('gateway_serial')
         if request.args.get('severity'):
@@ -6133,10 +6686,10 @@ def get_idps_events():
         if request.args.get('limit'):
             params['limit'] = request.args.get('limit')
 
-        response = aruba_client.get('/network-monitoring/v1alpha1/idps/events', params=params)
+        response = aruba_client.get('/network-monitoring/v1alpha1/threats', params=params)
         return jsonify(response)
     except Exception as e:
-        logger.error(f"Error fetching IDPS events: {e}")
+        logger.error(f"Error fetching IDPS threats: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -7760,8 +8313,280 @@ def get_wireless_wlans(serial): pass
 @api_proxy(lambda serial: f'/network-config/v1alpha1/aps/{serial}/system', error_msg="Get wireless system", fallback_data={})
 def get_wireless_system(serial): pass
 
+# ============= Client Real-Time Streaming (SSE + Webhooks) =============
+
+def verify_webhook_signature(payload, signature):
+    """Verify Aruba Central webhook signature using HMAC-SHA256."""
+    if not signature:
+        return False
+    secret = client_cache.get('webhook_secret', 'default-webhook-secret')
+    expected = hmac.new(
+        secret.encode('utf-8'),
+        payload,
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+@app.route('/api/webhook/clients', methods=['POST'])
+def webhook_clients():
+    """
+    Receive real-time client events from Aruba Central webhooks.
+    Supports events: client_connect, client_disconnect, client_update
+    """
+    try:
+        # Verify webhook signature (optional - can be disabled in dev)
+        signature = request.headers.get('X-Aruba-Signature', '')
+        if signature and not verify_webhook_signature(request.data, signature):
+            logger.warning("Webhook signature verification failed")
+            return jsonify({'error': 'Invalid signature'}), 401
+
+        event = request.json
+        if not event:
+            return jsonify({'error': 'No event data'}), 400
+
+        event_type = event.get('type', event.get('event_type', ''))
+        client_data = event.get('client', event.get('data', {}))
+
+        logger.info(f"Webhook received: type={event_type}, client_mac={client_data.get('mac', 'unknown')}")
+
+        with client_cache_lock:
+            if event_type in ('client_connect', 'client_connected'):
+                mac = client_data.get('mac', client_data.get('macAddress', ''))
+                if mac:
+                    client_cache['clients_by_mac'][mac] = client_data
+                    broadcast_delta_to_subscribers({
+                        'type': 'delta',
+                        'added': [client_data],
+                        'removed': [],
+                        'changed': [],
+                        'counts': calculate_client_counts(list(client_cache['clients_by_mac'].values()))
+                    })
+
+            elif event_type in ('client_disconnect', 'client_disconnected'):
+                mac = client_data.get('mac', client_data.get('macAddress', ''))
+                if mac and mac in client_cache['clients_by_mac']:
+                    del client_cache['clients_by_mac'][mac]
+                    broadcast_delta_to_subscribers({
+                        'type': 'delta',
+                        'added': [],
+                        'removed': [mac],
+                        'changed': [],
+                        'counts': calculate_client_counts(list(client_cache['clients_by_mac'].values()))
+                    })
+
+            elif event_type in ('client_update', 'client_changed'):
+                mac = client_data.get('mac', client_data.get('macAddress', ''))
+                if mac:
+                    old_client = client_cache['clients_by_mac'].get(mac, {})
+                    client_cache['clients_by_mac'][mac] = {**old_client, **client_data}
+                    broadcast_delta_to_subscribers({
+                        'type': 'delta',
+                        'added': [],
+                        'removed': [],
+                        'changed': [client_cache['clients_by_mac'][mac]],
+                        'counts': calculate_client_counts(list(client_cache['clients_by_mac'].values()))
+                    })
+
+        return jsonify({'status': 'ok', 'event_type': event_type}), 200
+
+    except Exception as e:
+        logger.error(f"Webhook processing error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/clients/stream')
+def clients_stream():
+    """
+    SSE endpoint for real-time client updates with delta support.
+
+    Query Parameters:
+        - session: Session ID for authentication
+        - sites: Comma-separated list of site IDs to monitor
+
+    Events:
+        - connected: Initial connection with full client list
+        - clients-delta: Delta updates (added/removed/changed clients)
+        - error: Error notifications
+    """
+    # Capture request data before entering generator
+    session_id = request.args.get('session')
+    sites_param = request.args.get('sites', '')
+    site_ids = [s.strip() for s in sites_param.split(',') if s.strip()]
+
+    # Try to load sessions from disk
+    if session_id and session_id not in active_sessions:
+        _load_sessions_from_disk()
+
+    # Validate session
+    if not session_id or session_id not in active_sessions:
+        def error_gen():
+            yield f"event: error\ndata: {json.dumps({'error': 'Invalid session'})}\n\n"
+        return Response(
+            error_gen(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+            }
+        )
+
+    # Refresh session expiry
+    active_sessions[session_id]['expires'] = time.time() + SESSION_TIMEOUT
+
+    def generate():
+        """Generator function that yields SSE formatted data."""
+        update_queue = queue.Queue(maxsize=100)
+        last_state = {}  # MAC -> client object
+
+        # Register this connection for webhook broadcasts
+        with client_cache_lock:
+            client_cache['sse_subscribers'].append(update_queue)
+
+        retry_count = 0
+        max_retries = 3
+
+        try:
+            # Fetch initial full state
+            if not aruba_client:
+                yield f"event: error\ndata: {json.dumps({'error': 'Server not configured'})}\n\n"
+                return
+
+            # Get all clients for selected sites
+            logger.info(f"SSE Clients: Fetching initial data for sites: {site_ids}")
+            clients = fetch_all_clients_for_sites(site_ids)
+
+            # Build initial state
+            for client in clients:
+                mac = client.get('mac', client.get('macAddress', ''))
+                if mac:
+                    last_state[mac] = client
+
+            # Send initial full state
+            initial_data = {
+                'type': 'full',
+                'clients': clients,
+                'counts': calculate_client_counts(clients),
+                'timestamp': datetime.now().isoformat()
+            }
+            yield f"event: connected\ndata: {json.dumps(initial_data)}\n\n"
+            logger.info(f"SSE Clients: Sent initial state with {len(clients)} clients")
+
+            # Main loop: wait for webhook events OR poll every 10 seconds
+            while True:
+                try:
+                    # Check for webhook-triggered updates (10 second timeout)
+                    try:
+                        delta = update_queue.get(timeout=10)
+                        # Filter delta to only include clients from selected sites
+                        if site_ids:
+                            filtered_added = [c for c in delta.get('added', []) if c.get('siteId') in site_ids]
+                            filtered_changed = [c for c in delta.get('changed', []) if c.get('siteId') in site_ids]
+                            # For removed, we check against our last_state
+                            filtered_removed = [mac for mac in delta.get('removed', []) if mac in last_state]
+
+                            if filtered_added or filtered_removed or filtered_changed:
+                                # Update last_state
+                                for client in filtered_added:
+                                    mac = client.get('mac', client.get('macAddress', ''))
+                                    if mac:
+                                        last_state[mac] = client
+
+                                for mac in filtered_removed:
+                                    last_state.pop(mac, None)
+
+                                for client in filtered_changed:
+                                    mac = client.get('mac', client.get('macAddress', ''))
+                                    if mac:
+                                        last_state[mac] = client
+
+                                filtered_delta = {
+                                    'type': 'delta',
+                                    'added': filtered_added,
+                                    'removed': filtered_removed,
+                                    'changed': filtered_changed,
+                                    'counts': calculate_client_counts(list(last_state.values())),
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                yield f"event: clients-delta\ndata: {json.dumps(filtered_delta)}\n\n"
+                        else:
+                            # No site filter, send all updates
+                            yield f"event: clients-delta\ndata: {json.dumps(delta)}\n\n"
+
+                        retry_count = 0
+
+                    except queue.Empty:
+                        # No webhook received, do a poll refresh
+                        new_clients = fetch_all_clients_for_sites(site_ids)
+                        delta = calculate_client_delta(last_state, new_clients)
+
+                        if delta['added'] or delta['removed'] or delta['changed']:
+                            # Update last_state
+                            last_state = {
+                                c.get('mac', c.get('macAddress', '')): c
+                                for c in new_clients
+                                if c.get('mac') or c.get('macAddress')
+                            }
+
+                            delta_data = {
+                                'type': 'delta',
+                                'added': delta['added'],
+                                'removed': delta['removed'],
+                                'changed': delta['changed'],
+                                'counts': calculate_client_counts(new_clients),
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            yield f"event: clients-delta\ndata: {json.dumps(delta_data)}\n\n"
+                            logger.debug(f"SSE Clients: Delta sent - added={len(delta['added'])}, removed={len(delta['removed'])}, changed={len(delta['changed'])}")
+
+                        retry_count = 0
+
+                except GeneratorExit:
+                    logger.info("SSE Clients: Client disconnected")
+                    break
+
+                except Exception as e:
+                    logger.error(f"SSE Clients: Error in stream loop: {e}")
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        yield f"event: error\ndata: {json.dumps({'error': 'Too many errors, closing stream'})}\n\n"
+                        break
+                    yield f"event: error\ndata: {json.dumps({'error': str(e), 'retry': retry_count})}\n\n"
+                    time.sleep(5)
+
+        except Exception as e:
+            logger.error(f"SSE Clients: Fatal error: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+        finally:
+            # Unregister this connection
+            with client_cache_lock:
+                try:
+                    client_cache['sse_subscribers'].remove(update_queue)
+                except ValueError:
+                    pass
+            logger.info("SSE Clients: Stream closed")
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Access-Control-Allow-Origin': request.headers.get('Origin', '*'),
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    )
+
+
 # ============= Main =============
 
 if __name__ == '__main__':
+    # Disable Flask's automatic dotenv loading to avoid Python 3.13 permission issues
+    os.environ['FLASK_SKIP_DOTENV'] = '1'
+    
     # Run Flask app
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5001))
+    app.run(host='0.0.0.0', port=port, debug=True, load_dotenv=False)

@@ -5,6 +5,7 @@
  */
 
 import axios from 'axios';
+import { flattenObject, escapeCSV, getSubscriptionTierName, SUBSCRIPTION_TIER_MAP } from '../utils/exportUtils';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -950,6 +951,25 @@ export const greenlakeRoleAPI = {
     const response = await apiClient.delete(`/greenlake/role-assignments/${encodeURIComponent(assignmentId)}`);
     return response.data;
   },
+
+  listPermissions: async () => {
+    const response = await apiClient.get('/greenlake/permissions');
+    return response.data;
+  },
+
+  getRolePermissions: async () => {
+    const response = await apiClient.get('/greenlake/role-permissions');
+    return response.data;
+  },
+
+  createCustomRole: async ({ name, permissions, description }) => {
+    const response = await apiClient.post('/greenlake/custom-roles', {
+      name,
+      permissions,
+      description,
+    });
+    return response.data;
+  },
 };
 
 /**
@@ -958,6 +978,24 @@ export const greenlakeRoleAPI = {
 export const greenlakeDeviceAPI = {
   list: async (params = {}) => {
     const response = await apiClient.get('/greenlake/devices', { params });
+    return response.data;
+  },
+
+  listWithTiers: async (params = {}) => {
+    // Fetch devices with subscription tier enrichment
+    const response = await apiClient.get('/greenlake/devices', {
+      params: { ...params, enrich_tiers: 'true' }
+    });
+    return response.data;
+  },
+
+  create: async (deviceData) => {
+    const response = await apiClient.post('/greenlake/devices', deviceData);
+    return response.data;
+  },
+
+  update: async (deviceData) => {
+    const response = await apiClient.patch('/greenlake/devices', deviceData);
     return response.data;
   },
 };
@@ -970,6 +1008,21 @@ export const greenlakeTagsAPI = {
     const response = await apiClient.get('/greenlake/tags');
     return response.data;
   },
+
+  create: async (tagData) => {
+    const response = await apiClient.post('/greenlake/tags', tagData);
+    return response.data;
+  },
+
+  update: async (tagId, tagData) => {
+    const response = await apiClient.patch(`/greenlake/tags/${encodeURIComponent(tagId)}`, tagData);
+    return response.data;
+  },
+
+  delete: async (tagId) => {
+    const response = await apiClient.delete(`/greenlake/tags/${encodeURIComponent(tagId)}`);
+    return response.data;
+  },
 };
 
 /**
@@ -980,14 +1033,90 @@ export const greenlakeSubscriptionsAPI = {
     const response = await apiClient.get('/greenlake/subscriptions', { params });
     return response.data;
   },
+
+  create: async (subscriptionData) => {
+    const response = await apiClient.post('/greenlake/subscriptions', subscriptionData);
+    return response.data;
+  },
+
+  update: async (subscriptionId, subscriptionData) => {
+    const response = await apiClient.patch(`/greenlake/subscriptions/${encodeURIComponent(subscriptionId)}`, subscriptionData);
+    return response.data;
+  },
 };
 
 /**
- * GreenLake Workspaces API
+ * GreenLake Workspaces API (MSP)
  */
 export const greenlakeWorkspacesAPI = {
   list: async () => {
     const response = await apiClient.get('/greenlake/workspaces');
+    return response.data;
+  },
+
+  create: async (workspaceData) => {
+    const response = await apiClient.post('/greenlake/workspaces', workspaceData);
+    return response.data;
+  },
+
+  update: async (workspaceId, workspaceData) => {
+    const response = await apiClient.patch(`/greenlake/workspaces/${encodeURIComponent(workspaceId)}`, workspaceData);
+    return response.data;
+  },
+
+  delete: async (workspaceId) => {
+    const response = await apiClient.delete(`/greenlake/workspaces/${encodeURIComponent(workspaceId)}`);
+    return response.data;
+  },
+
+  transferTokens: async (transferData) => {
+    const response = await apiClient.post('/greenlake/msp/token-transfer', transferData);
+    return response.data;
+  },
+};
+
+/**
+ * Workspace API - Current workspace management
+ */
+export const workspaceAPI = {
+  getInfo: async () => {
+    const response = await apiClient.get('/workspace/info');
+    return response.data;
+  },
+
+  switch: async ({ client_id, client_secret, customer_id, gl_client_id, gl_client_secret }) => {
+    const response = await apiClient.post('/workspace/switch', {
+      client_id,
+      client_secret,
+      customer_id,
+      gl_client_id,
+      gl_client_secret,
+    });
+    return response.data;
+  },
+};
+
+/**
+ * GreenLake Locations API
+ */
+export const greenlakeLocationsAPI = {
+  list: async (params = {}) => {
+    const response = await apiClient.get('/greenlake/locations', { params });
+    return response.data;
+  },
+
+  create: async (locationData) => {
+    const response = await apiClient.post('/greenlake/locations', locationData);
+    return response.data;
+  },
+
+  update: async (locationId, locationData) => {
+    const response = await apiClient.patch(`/greenlake/locations/${encodeURIComponent(locationId)}`, locationData);
+    return response.data;
+  },
+
+  delete: async (locationId) => {
+    const response = await apiClient.delete(`/greenlake/locations/${encodeURIComponent(locationId)}`);
     return response.data;
   },
 };
@@ -1560,45 +1689,13 @@ export const servicesAPI = {
 };
 
 /**
- * Workspace Management API
- */
-export const workspaceAPI = {
-  switch: async (clientId, clientSecret, customerId, baseUrl) => {
-    const response = await apiClient.post('/workspace/switch', {
-      client_id: clientId,
-      client_secret: clientSecret,
-      customer_id: customerId,
-      base_url: baseUrl,
-    });
-    return response.data;
-  },
-
-  getInfo: async () => {
-    const response = await apiClient.get('/workspace/info');
-    return response.data;
-  },
-};
-
-/**
  * Advanced Monitoring API
  */
 export const monitoringAPIv2 = {
   // Site Health
   getSitesHealth: async (params = {}) => {
-    try {
-      const response = await apiClient.get('/sites/health', { params });
-      console.log('🔍 getSitesHealth raw response:', response);
-      console.log('🔍 getSitesHealth response.data:', response.data);
-      console.log('🔍 getSitesHealth response.status:', response.status);
-      if (!response.data) {
-        console.warn('⚠️ getSitesHealth: response.data is null/undefined');
-      }
-      return response.data;
-    } catch (error) {
-      console.error('❌ getSitesHealth error:', error);
-      console.error('❌ getSitesHealth error.response:', error.response);
-      throw error;
-    }
+    const response = await apiClient.get('/sites/health', { params });
+    return response.data;
   },
 
   getSiteHealth: async (siteId) => {
@@ -1607,19 +1704,8 @@ export const monitoringAPIv2 = {
   },
 
   getSitesDeviceHealth: async (params = {}) => {
-    try {
-      const response = await apiClient.get('/sites/device-health', { params });
-      console.log('🔍 getSitesDeviceHealth raw response:', response);
-      console.log('🔍 getSitesDeviceHealth response.data:', response.data);
-      if (!response.data) {
-        console.warn('⚠️ getSitesDeviceHealth: response.data is null/undefined');
-      }
-      return response.data;
-    } catch (error) {
-      console.error('❌ getSitesDeviceHealth error:', error);
-      console.error('❌ getSitesDeviceHealth error.response:', error.response);
-      throw error;
-    }
+    const response = await apiClient.get('/sites/device-health', { params });
+    return response.data;
   },
 
   getTenantDeviceHealth: async (params = {}) => {
@@ -1911,5 +1997,411 @@ export const showCommandsAPI = {
     return response.data;
   },
 };
+
+/**
+ * Batch API Execution
+ * Execute multiple API endpoints in parallel and collect results
+ */
+export const batchAPI = {
+  /**
+   * Execute multiple API endpoints in parallel
+   * @param {Array} endpoints - Array of endpoint objects with apiModule references
+   * @returns {Promise<Array>} Array of results with status and data/error
+   */
+  executeAll: async (endpoints) => {
+    const executeEndpoint = async (endpoint) => {
+      try {
+        // Parse the apiModule path to get the actual function
+        const [moduleName, methodName] = endpoint.apiModule?.split('.') || [];
+
+        // Map module names to actual API objects
+        const moduleMap = {
+          monitoringAPIv2,
+          deviceAPI,
+          wlanAPI,
+          configAPI,
+          alertsAPI,
+          firmwareAPI,
+          reportingAPI,
+          greenlakeUserAPI,
+          greenlakeDeviceAPI,
+          greenlakeTagsAPI,
+          greenlakeSubscriptionsAPI,
+          greenlakeWorkspacesAPI,
+          greenlakeRoleAPI,
+          greenlakeLocationsAPI,
+          troubleshootAPI,
+        };
+
+        const module = moduleMap[moduleName];
+        if (!module || !module[methodName]) {
+          throw new Error(`Unknown API module: ${endpoint.apiModule}`);
+        }
+
+        const data = await module[methodName]();
+
+        return {
+          endpointId: endpoint.id,
+          name: endpoint.name,
+          endpoint: endpoint.endpoint,
+          status: 'fulfilled',
+          data,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (error) {
+        return {
+          endpointId: endpoint.id,
+          name: endpoint.name,
+          endpoint: endpoint.endpoint,
+          status: 'rejected',
+          error: error.message || 'Unknown error',
+          timestamp: new Date().toISOString(),
+        };
+      }
+    };
+
+    // Execute all endpoints in parallel
+    const results = await Promise.all(endpoints.map(executeEndpoint));
+    
+    // Auto-merge results if possible
+    return batchAPI.mergeResults(results);
+  },
+
+  /**
+   * Merge multiple API results by matching on common keys (serial number, ID, etc.)
+   * @param {Array} results - Array of execution results
+   * @returns {Array} Merged results or original if no merge possible
+   */
+  mergeResults: (results) => {
+    // Only merge if we have 2+ successful results
+    const successfulResults = results.filter(r => r.status === 'fulfilled' && r.data);
+    if (successfulResults.length < 2) {
+      return results;
+    }
+
+    // Extract arrays from each result
+    const datasets = successfulResults.map(result => {
+      const data = result.data;
+      const items = data.items || data.devices || data.wlans || 
+                    data.clients || data.alerts || data.sites ||
+                    (Array.isArray(data) ? data : [data]);
+      return {
+        name: result.name,
+        endpoint: result.endpoint,
+        items: Array.isArray(items) ? items : [items],
+      };
+    });
+
+    // Find common matching keys across datasets
+    const findMatchingKey = (datasets) => {
+      const possibleKeys = ['serialNumber', 'serial', 'macAddress', 'mac', 'id', 'name', 'email'];
+      
+      for (const key of possibleKeys) {
+        // Check if all datasets have this key in their first item
+        const allHaveKey = datasets.every(ds => 
+          ds.items.length > 0 && ds.items[0].hasOwnProperty(key)
+        );
+        if (allHaveKey) {
+          return key;
+        }
+      }
+      return null;
+    };
+
+    const matchingKey = findMatchingKey(datasets);
+    
+    // If no common key found, return original results (can't merge)
+    if (!matchingKey) {
+      return results;
+    }
+
+    // Merge datasets by matching key
+    const mergedMap = new Map();
+
+    datasets.forEach((dataset, datasetIndex) => {
+      dataset.items.forEach(item => {
+        const keyValue = item[matchingKey];
+        if (!keyValue) return;
+
+        if (!mergedMap.has(keyValue)) {
+          // First dataset - initialize with this item
+          mergedMap.set(keyValue, {
+            [matchingKey]: keyValue,
+            ...item,
+          });
+        } else {
+          // Merge with existing item, prefixing conflicting keys with source name
+          const existing = mergedMap.get(keyValue);
+          const sourcePrefix = dataset.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          
+          Object.entries(item).forEach(([key, value]) => {
+            if (key === matchingKey) return; // Skip the matching key
+            
+            // If key exists and values differ, prefix it
+            if (existing[key] !== undefined && existing[key] !== value) {
+              existing[`${sourcePrefix}_${key}`] = value;
+            } else if (existing[key] === undefined) {
+              existing[key] = value;
+            }
+          });
+        }
+      });
+    });
+
+    // Convert map back to array
+    const mergedItems = Array.from(mergedMap.values());
+
+    // Return as a single merged result
+    return [{
+      endpointId: 'merged',
+      name: `Merged by ${matchingKey}`,
+      endpoint: successfulResults.map(r => r.name).join(' + '),
+      status: 'fulfilled',
+      data: { items: mergedItems },
+      timestamp: new Date().toISOString(),
+      merged: true,
+      sources: successfulResults.map(r => r.name),
+    }];
+  },
+
+  /**
+   * Export batch results to JSON
+   * @param {Array} results - Array of execution results
+   * @param {Array} selectedFields - Optional array of field names to include
+   */
+  exportAsJSON: (results, selectedFields = null) => {
+    let filteredResults = results;
+    
+    // Filter fields if selectedFields provided
+    if (selectedFields && selectedFields.length > 0) {
+      filteredResults = results.map((result) => {
+        if (result.status === 'fulfilled' && result.data) {
+          const filteredData = {};
+          selectedFields.forEach((field) => {
+            if (field.includes('.')) {
+              // Handle nested fields like 'application.id'
+              const parts = field.split('.');
+              let value = result.data;
+              for (const part of parts) {
+                value = value?.[part];
+              }
+              filteredData[field] = value;
+            } else if (result.data[field] !== undefined) {
+              filteredData[field] = result.data[field];
+            }
+          });
+          return { ...result, data: filteredData };
+        }
+        return result;
+      });
+    }
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      totalEndpoints: filteredResults.length,
+      successful: filteredResults.filter((r) => r.status === 'fulfilled').length,
+      failed: filteredResults.filter((r) => r.status === 'rejected').length,
+      selectedFields: selectedFields || 'all',
+      results: filteredResults,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    try {
+      link.href = url;
+      // Generate unique filename with date and time
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `api-results_${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+
+  /**
+   * Export batch results to CSV
+   * @param {Array} results - Array of execution results
+   * @param {Array} selectedFields - Optional array of field names to include
+   */
+  exportAsCSV: (results, selectedFields = null) => {
+    // Flatten and combine all data
+    const rows = [];
+
+    results.forEach((result) => {
+      if (result.status === 'fulfilled' && result.data) {
+        // Handle different response structures
+        const items = result.data.items || result.data.devices || result.data.wlans ||
+                      result.data.clients || result.data.alerts || result.data.sites ||
+                      [result.data];
+
+        if (Array.isArray(items)) {
+          items.forEach((item) => {
+            const flatItem = {
+              _source: result.merged ? `MERGED: ${result.sources.join(' + ')}` : result.name,
+              _endpoint: result.endpoint,
+              ...flattenObject(item),
+            };
+            
+            // Filter fields if selectedFields provided
+            if (selectedFields && selectedFields.length > 0) {
+              const filteredItem = { _source: flatItem._source, _endpoint: flatItem._endpoint };
+              selectedFields.forEach((field) => {
+                if (flatItem[field] !== undefined) {
+                  filteredItem[field] = flatItem[field];
+                }
+              });
+              
+              // ALWAYS include dynamically generated _tier fields (even if not explicitly selected)
+              Object.keys(flatItem).forEach((key) => {
+                if (key.endsWith('_tier') && flatItem[key]) {
+                  filteredItem[key] = flatItem[key];
+                }
+              });
+              
+              rows.push(filteredItem);
+            } else {
+              rows.push(flatItem);
+            }
+          });
+        }
+      }
+    });
+
+    if (rows.length === 0) {
+      console.warn('No data to export');
+      return;
+    }
+
+    // Get all unique keys (or use selectedFields if provided)
+    const allKeys = selectedFields && selectedFields.length > 0
+      ? ['_source', '_endpoint', ...selectedFields]
+      : [...new Set(rows.flatMap(Object.keys))];
+
+    // Build CSV
+    const header = allKeys.map(escapeCSV).join(',');
+    const csvRows = rows.map((row) =>
+      allKeys.map((key) => escapeCSV(row[key])).join(',')
+    );
+
+    const csv = [header, ...csvRows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    try {
+      link.href = url;
+      // Generate unique filename with date and time
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `api-results_${timestamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+};
+
+// Utility functions imported from ../utils/exportUtils:
+// - flattenObject, escapeCSV, getSubscriptionTierName, SUBSCRIPTION_TIER_MAP
+
+// ============= Client Streaming Helper =============
+
+/**
+ * Create an SSE connection for real-time client updates.
+ *
+ * @param {string[]} siteIds - Array of site IDs to monitor
+ * @param {Object} handlers - Event handler callbacks
+ * @param {Function} handlers.onConnected - Called when connection established with full client data
+ * @param {Function} handlers.onDelta - Called when delta update received
+ * @param {Function} handlers.onError - Called when error occurs
+ * @returns {Object} - { close: Function, eventSource: EventSource }
+ */
+export const createClientsStream = (siteIds, handlers) => {
+  const sessionId = getSessionId();
+
+  if (!sessionId) {
+    console.error('No session ID available for SSE connection');
+    if (handlers.onError) {
+      handlers.onError(new Error('No session ID'));
+    }
+    return { close: () => {}, eventSource: null };
+  }
+
+  const sitesParam = Array.isArray(siteIds) ? siteIds.join(',') : siteIds;
+  const url = `/api/clients/stream?session=${sessionId}&sites=${encodeURIComponent(sitesParam)}`;
+
+  console.log('🔌 Creating SSE connection for clients:', url);
+  const eventSource = new EventSource(url);
+
+  // Connection established - receives full client data
+  eventSource.addEventListener('connected', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      console.log('✅ SSE Clients connected:', data.clients?.length || 0, 'clients');
+      if (handlers.onConnected) {
+        handlers.onConnected(data);
+      }
+    } catch (err) {
+      console.error('Failed to parse connected event:', err);
+    }
+  });
+
+  // Delta update - receives only changes
+  eventSource.addEventListener('clients-delta', (e) => {
+    try {
+      const delta = JSON.parse(e.data);
+      console.log('📊 SSE Clients delta:', {
+        added: delta.added?.length || 0,
+        removed: delta.removed?.length || 0,
+        changed: delta.changed?.length || 0
+      });
+      if (handlers.onDelta) {
+        handlers.onDelta(delta);
+      }
+    } catch (err) {
+      console.error('Failed to parse delta event:', err);
+    }
+  });
+
+  // Error event from server
+  eventSource.addEventListener('error', (e) => {
+    console.error('SSE Clients error event:', e);
+    if (handlers.onError) {
+      try {
+        const errorData = e.data ? JSON.parse(e.data) : { error: 'Connection error' };
+        handlers.onError(new Error(errorData.error || 'SSE error'));
+      } catch {
+        handlers.onError(new Error('SSE connection error'));
+      }
+    }
+  });
+
+  // Connection error (network issues)
+  eventSource.onerror = (e) => {
+    if (eventSource.readyState === EventSource.CLOSED) {
+      console.warn('SSE Clients connection closed');
+    } else if (eventSource.readyState === EventSource.CONNECTING) {
+      console.log('SSE Clients reconnecting...');
+    }
+  };
+
+  return {
+    close: () => {
+      console.log('🔌 Closing SSE clients connection');
+      eventSource.close();
+    },
+    eventSource
+  };
+};
+
+// Export session utilities for SSE connections
+export { getSessionId, createClientsStream };
 
 export default apiClient;

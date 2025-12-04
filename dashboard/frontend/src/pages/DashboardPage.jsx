@@ -4,7 +4,7 @@
  * Optimized for faster loading with caching and optimistic UI
  */
 
-import { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -27,7 +27,12 @@ import PeopleIcon from '@mui/icons-material/People';
 import ApiIcon from '@mui/icons-material/Api';
 import SpeedIcon from '@mui/icons-material/Speed';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
-import { monitoringAPI, deviceAPI, getClients, rateLimitAPI, sitesConfigAPI } from '../services/api';
+import { monitoringAPI, deviceAPI, getClients, rateLimitAPI, sitesConfigAPI, getSessionId } from '../services/api';
+
+// SSE Configuration
+const SSE_ENDPOINT = '/api/dashboard/stream';
+const SSE_RECONNECT_DELAY = 5000; // 5 seconds
+const SSE_MAX_RETRIES = 3;
 
 // Cache keys
 const CACHE_KEYS = {
@@ -71,7 +76,8 @@ const cacheUtils = {
 /**
  * Memoized StatsCard component to prevent unnecessary re-renders
  */
-const StatsCard = memo(function StatsCard({ title, value, icon: Icon, color, loading, trend, trendValue, subtitle, onClick }) {
+const StatsCard = memo(function StatsCard({ title, value, icon: Icon, color, loading, trend: _trend, trendValue: _trendValue, subtitle, onClick }) {
+  // Note: _trend and _trendValue are reserved for future trend indicator display
   // Map theme color names to actual colors
   const colorMap = useMemo(() => ({
     'primary': '#FF6600',
@@ -293,7 +299,7 @@ function DashboardPage() {
     } else {
       setLoading(true);
     }
-    
+
     try {
       setError('');
 
@@ -364,12 +370,12 @@ function DashboardPage() {
         setPreviousStats(prevStats);
         // Update cached display stats if values changed
         setCachedDisplayStats(prevCached => {
-          const hasChanges = 
+          const hasChanges =
             newStats.totalDevices !== prevCached.totalDevices ||
             newStats.switches !== prevCached.switches ||
             newStats.accessPoints !== prevCached.accessPoints ||
             newStats.gateways !== prevCached.gateways;
-          
+
           if (hasChanges) {
             const updated = {
               ...prevCached,
@@ -385,9 +391,10 @@ function DashboardPage() {
           return prevCached;
         });
         // Cache the results (clients will be updated separately)
+        // IMPORTANT: preserve existing clients count to avoid flickering
         const finalStats = { ...newStats, clients: prevStats?.clients || cachedDisplayStats.clients || 0 };
         cacheUtils.set(CACHE_KEYS.STATS, finalStats);
-        return newStats;
+        return finalStats;  // Return finalStats to preserve clients
       });
       setLastUpdated(new Date());
     } catch (err) {
@@ -410,36 +417,176 @@ function DashboardPage() {
     }
   }, [withTimeout, fetchClientsCount]);
 
-  // Initial load and refresh interval
+  // Track if initial load has happened
+  const initialLoadDone = useRef(false);
+
+  // Initial load - runs once on mount
   useEffect(() => {
     let mounted = true;
-    
+
     const loadData = async () => {
       // If we have cached stats, set them immediately for display
-      if (cachedStats) {
+      if (cachedStats && !initialLoadDone.current) {
         setCachedDisplayStats(cachedStats);
         setStats(cachedStats);
       }
       // Then refresh in background
       await fetchDashboardData(false);
       if (mounted) await fetchRateLimitData();
+      initialLoadDone.current = true;
     };
 
     loadData();
 
-    // Refresh every 60 seconds (only refresh, don't show loading)
-    const interval = setInterval(() => {
-      if (mounted) {
-        fetchDashboardData(true);
-        fetchRateLimitData();
-      }
-    }, 60000);
-    
     return () => {
       mounted = false;
-      clearInterval(interval);
     };
-  }, []); // Only run on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount - fetchDashboardData/fetchRateLimitData are stable via useCallback
+
+  // SSE connection state
+  const sseRef = useRef(null);
+  const sseRetriesRef = useRef(0);
+  const fallbackIntervalRef = useRef(null);
+
+  // SSE connection for real-time updates (with fallback to polling)
+  useEffect(() => {
+    let mounted = true;
+
+    const connectSSE = () => {
+      const sessionId = getSessionId();
+      if (!sessionId) {
+        // No session, fall back to polling
+        startFallbackPolling();
+        return;
+      }
+
+      // Close existing connection
+      if (sseRef.current) {
+        sseRef.current.close();
+      }
+
+      const url = `${SSE_ENDPOINT}?session=${encodeURIComponent(sessionId)}`;
+      const eventSource = new EventSource(url);
+      sseRef.current = eventSource;
+
+      eventSource.addEventListener('connected', (event) => {
+        if (!mounted) return;
+        const data = JSON.parse(event.data);
+        console.log('SSE connected:', data);
+        sseRetriesRef.current = 0;
+        // Clear fallback polling if active
+        if (fallbackIntervalRef.current) {
+          clearInterval(fallbackIntervalRef.current);
+          fallbackIntervalRef.current = null;
+        }
+      });
+
+      eventSource.addEventListener('dashboard-update', (event) => {
+        if (!mounted) return;
+        try {
+          const data = JSON.parse(event.data);
+
+          // Update device stats
+          if (data.devices) {
+            setStats(prev => {
+              const newStats = {
+                ...prev,
+                totalDevices: data.devices.total,
+                switches: data.devices.switches,
+                accessPoints: data.devices.accessPoints,
+                gateways: data.devices.gateways,
+              };
+              cacheUtils.set(CACHE_KEYS.STATS, newStats);
+              return newStats;
+            });
+            setCachedDisplayStats(prev => ({
+              ...prev,
+              totalDevices: data.devices.total,
+              switches: data.devices.switches,
+              accessPoints: data.devices.accessPoints,
+              gateways: data.devices.gateways,
+            }));
+          }
+
+          // Update client count
+          if (data.clients) {
+            setStats(prev => {
+              const newStats = { ...prev, clients: data.clients.total };
+              cacheUtils.set(CACHE_KEYS.STATS, newStats);
+              return newStats;
+            });
+            setCachedDisplayStats(prev => ({ ...prev, clients: data.clients.total }));
+          }
+
+          // Update rate limit
+          if (data.rateLimit) {
+            setRateLimit(data.rateLimit);
+            cacheUtils.set(CACHE_KEYS.RATE_LIMIT, data.rateLimit);
+          }
+
+          setLastUpdated(new Date());
+          setRefreshing(false);
+        } catch (err) {
+          console.warn('SSE: Failed to parse update:', err);
+        }
+      });
+
+      eventSource.addEventListener('error', (event) => {
+        if (!mounted) return;
+        try {
+          const data = JSON.parse(event.data);
+          console.warn('SSE error event:', data);
+        } catch {
+          // Generic error
+        }
+      });
+
+      eventSource.onerror = () => {
+        if (!mounted) return;
+        console.warn('SSE connection error, attempting reconnect...');
+        eventSource.close();
+        sseRef.current = null;
+
+        sseRetriesRef.current++;
+        if (sseRetriesRef.current >= SSE_MAX_RETRIES) {
+          console.warn('SSE max retries reached, falling back to polling');
+          startFallbackPolling();
+        } else {
+          // Reconnect after delay
+          setTimeout(() => {
+            if (mounted) connectSSE();
+          }, SSE_RECONNECT_DELAY);
+        }
+      };
+    };
+
+    const startFallbackPolling = () => {
+      if (fallbackIntervalRef.current) return; // Already polling
+      console.log('Starting fallback polling (60s interval)');
+      fallbackIntervalRef.current = setInterval(() => {
+        if (mounted) {
+          fetchDashboardData(true);
+          fetchRateLimitData();
+        }
+      }, 60000);
+    };
+
+    // Start SSE connection
+    connectSSE();
+
+    return () => {
+      mounted = false;
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+      if (fallbackIntervalRef.current) {
+        clearInterval(fallbackIntervalRef.current);
+        fallbackIntervalRef.current = null;
+      }
+    };
+  }, [fetchDashboardData, fetchRateLimitData]);
 
   const getTrend = useCallback((current, previous) => {
     if (!previous || previous === 0) return null;
